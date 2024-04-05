@@ -327,7 +327,9 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                 .with_cache_size(0)
             } else {
                 identify::Config::new("eth2/1.0.0".into(), local_public_key)
-                    .with_agent_version(grandine_version::version_with_platform())
+                    .with_agent_version(
+                        grandine_version::APPLICATION_VERSION_WITH_PLATFORM.to_owned(),
+                    )
                     .with_cache_size(0)
             };
             identify::Behaviour::new(identify_config)
