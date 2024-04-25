@@ -24,6 +24,7 @@ use types::{
         SignedBeaconBlock,
     },
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebSignedBeaconBlock},
+    electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
     nonstandard::Phase,
     phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::ForkDigest},
     preset::Preset,
@@ -399,6 +400,9 @@ fn context_bytes<P: Preset>(
                     return match **ref_box_block {
                         // NOTE: If you are adding another fork type here, be sure to modify the
                         //       `fork_context.to_context_bytes()` function to support it as well!
+                        SignedBeaconBlock::Electra { .. } => {
+                            fork_context.to_context_bytes(Phase::Electra)
+                        }
                         SignedBeaconBlock::Deneb { .. } => {
                             fork_context.to_context_bytes(Phase::Deneb)
                         }
@@ -424,6 +428,9 @@ fn context_bytes<P: Preset>(
                 }
                 RPCResponse::LightClientBootstrap(lc_bootstrap) => {
                     return match **lc_bootstrap {
+                        LightClientBootstrap::Electra(_) => {
+                            fork_context.to_context_bytes(Phase::Electra)
+                        }
                         LightClientBootstrap::Deneb(_) => {
                             fork_context.to_context_bytes(Phase::Deneb)
                         }
@@ -437,6 +444,9 @@ fn context_bytes<P: Preset>(
                 }
                 RPCResponse::LightClientOptimisticUpdate(lc_optimistic_update) => {
                     return match **lc_optimistic_update {
+                        LightClientOptimisticUpdate::Electra(_) => {
+                            fork_context.to_context_bytes(Phase::Electra)
+                        }
                         LightClientOptimisticUpdate::Deneb(_) => {
                             fork_context.to_context_bytes(Phase::Deneb)
                         }
@@ -450,6 +460,9 @@ fn context_bytes<P: Preset>(
                 }
                 RPCResponse::LightClientFinalityUpdate(lc_finality_update) => {
                     return match **lc_finality_update {
+                        LightClientFinalityUpdate::Electra(_) => {
+                            fork_context.to_context_bytes(Phase::Electra)
+                        }
                         LightClientFinalityUpdate::Deneb(_) => {
                             fork_context.to_context_bytes(Phase::Deneb)
                         }
@@ -657,6 +670,11 @@ fn handle_rpc_response<P: Preset>(
                     .map(LightClientBootstrap::Deneb)
                     .map(Arc::new)?,
             ))),
+            Some(Phase::Electra) => Ok(Some(RPCResponse::LightClientBootstrap(
+                SszReadDefault::from_ssz_default(decoded_buffer)
+                    .map(LightClientBootstrap::Electra)
+                    .map(Arc::new)?,
+            ))),
             None => Err(RPCError::ErrorResponse(
                 RPCResponseErrorCode::InvalidRequest,
                 format!(
@@ -755,6 +773,11 @@ fn handle_rpc_response<P: Preset>(
             Some(Phase::Deneb) => Ok(Some(RPCResponse::BlocksByRange(Arc::new(
                 SignedBeaconBlock::Deneb(DenebSignedBeaconBlock::from_ssz_default(decoded_buffer)?),
             )))),
+            Some(Phase::Electra) => Ok(Some(RPCResponse::BlocksByRange(Arc::new(
+                SignedBeaconBlock::Electra(ElectraSignedBeaconBlock::from_ssz_default(
+                    decoded_buffer,
+                )?),
+            )))),
             None => Err(RPCError::ErrorResponse(
                 RPCResponseErrorCode::InvalidRequest,
                 format!(
@@ -786,6 +809,11 @@ fn handle_rpc_response<P: Preset>(
             )))),
             Some(Phase::Deneb) => Ok(Some(RPCResponse::BlocksByRoot(Arc::new(
                 SignedBeaconBlock::Deneb(DenebSignedBeaconBlock::from_ssz_default(decoded_buffer)?),
+            )))),
+            Some(Phase::Electra) => Ok(Some(RPCResponse::BlocksByRoot(Arc::new(
+                SignedBeaconBlock::Electra(ElectraSignedBeaconBlock::from_ssz_default(
+                    decoded_buffer,
+                )?),
             )))),
             None => Err(RPCError::ErrorResponse(
                 RPCResponseErrorCode::InvalidRequest,

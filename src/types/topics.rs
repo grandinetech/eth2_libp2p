@@ -69,6 +69,7 @@ pub fn fork_core_topics(phase: &Phase) -> Vec<GossipKind> {
             deneb_topics.append(&mut deneb_blob_topics);
             deneb_topics
         }
+        Phase::Electra => vec![],
     }
 }
 
