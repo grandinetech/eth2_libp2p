@@ -27,6 +27,8 @@ pub const SIGNED_BEACON_BLOCK_ALTAIR_MAX: usize = 157916;
 pub const SIGNED_BEACON_BLOCK_BELLATRIX_MAX: usize = 1125899911195388;
 pub const SIGNED_BEACON_BLOCK_CAPELLA_MAX: usize = 1125899911199368;
 pub const SIGNED_BEACON_BLOCK_DENEB_MAX: usize = 1125899911199676;
+// TODO(feature/electra):
+pub const SIGNED_BEACON_BLOCK_ELECTRA_MAX: usize = 1125899911199676;
 
 pub const BLOB_SIDECAR_MIN: usize = 131928;
 pub const BLOB_SIDECAR_MAX: usize = 131928;
@@ -53,6 +55,7 @@ pub fn max_rpc_size(fork_context: &ForkContext, max_chunk_size: usize) -> usize 
         Phase::Bellatrix => max_chunk_size,
         Phase::Capella => max_chunk_size,
         Phase::Deneb => max_chunk_size,
+        Phase::Electra => max_chunk_size,
     }
 }
 
@@ -81,6 +84,10 @@ pub fn rpc_block_limits_by_fork(current_fork: Phase) -> RpcLimits {
         Phase::Deneb => RpcLimits::new(
             SIGNED_BEACON_BLOCK_PHASE0_MIN, // Base block is smaller than altair and merge blocks
             SIGNED_BEACON_BLOCK_DENEB_MAX,  // EIP 4844 block is larger than all prior fork blocks
+        ),
+        Phase::Electra => RpcLimits::new(
+            SIGNED_BEACON_BLOCK_PHASE0_MIN, // Base block is smaller than altair and merge blocks
+            SIGNED_BEACON_BLOCK_ELECTRA_MAX, // Electra block is larger than Deneb block
         ),
     }
 }

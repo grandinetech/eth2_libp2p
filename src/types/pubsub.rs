@@ -16,6 +16,7 @@ use types::{
     capella::containers::{SignedBeaconBlock as CapellaBeaconBlock, SignedBlsToExecutionChange},
     combined::{LightClientFinalityUpdate, LightClientOptimisticUpdate, SignedBeaconBlock},
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebBeaconBlock},
+    electra::containers::SignedBeaconBlock as ElectraBeaconBlock,
     nonstandard::Phase,
     phase0::{
         containers::{
@@ -202,6 +203,10 @@ impl<P: Preset> PubsubMessage<P> {
                                     DenebBeaconBlock::from_ssz_default(data)
                                         .map_err(|e| format!("{:?}", e))?,
                                 ),
+                                Some(Phase::Electra) => SignedBeaconBlock::Electra(
+                                    ElectraBeaconBlock::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
                                 None => {
                                     return Err(format!(
                                         "Unknown gossipsub fork digest: {:?}",
@@ -213,7 +218,7 @@ impl<P: Preset> PubsubMessage<P> {
                     }
                     GossipKind::BlobSidecar(blob_index) => {
                         match fork_context.from_context_bytes(gossip_topic.fork_digest) {
-                            Some(Phase::Deneb) => {
+                            Some(Phase::Deneb | Phase::Electra) => {
                                 let blob_sidecar = Arc::new(
                                     BlobSidecar::from_ssz_default(data)
                                         .map_err(|e| format!("{:?}", e))?,
@@ -297,6 +302,12 @@ impl<P: Preset> PubsubMessage<P> {
                                         .map_err(|e| format!("{:?}", e))?
                                         .into()
                                 }
+                                Some(Phase::Electra) => {
+                                    SszReadDefault::from_ssz_default(data)
+                                        .map(LightClientFinalityUpdate::Electra)
+                                        .map_err(|e| format!("{:?}", e))?
+                                        .into()
+                                }
                                 None => {
                                     return Err(format!(
                                         "light_client_finality_update topic invalid for given fork digest {:?}",
@@ -331,6 +342,11 @@ impl<P: Preset> PubsubMessage<P> {
                                 Some(Phase::Deneb) => {
                                     SszReadDefault::from_ssz_default(data)
                                         .map(LightClientOptimisticUpdate::Deneb)
+                                        .map_err(|e| format!("{:?}", e))?
+                                }
+                                Some(Phase::Electra) => {
+                                    SszReadDefault::from_ssz_default(data)
+                                        .map(LightClientOptimisticUpdate::Electra)
                                         .map_err(|e| format!("{:?}", e))?
                                 }
                                 None => {
