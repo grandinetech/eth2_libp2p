@@ -14,13 +14,21 @@ use types::{
     },
     bellatrix::containers::SignedBeaconBlock as BellatrixBeaconBlock,
     capella::containers::{SignedBeaconBlock as CapellaBeaconBlock, SignedBlsToExecutionChange},
-    combined::{LightClientFinalityUpdate, LightClientOptimisticUpdate, SignedBeaconBlock},
+    combined::{
+        Attestation, LightClientFinalityUpdate, LightClientOptimisticUpdate,
+        SignedAggregateAndProof, SignedBeaconBlock,
+    },
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebBeaconBlock},
-    electra::containers::SignedBeaconBlock as ElectraBeaconBlock,
+    electra::containers::{
+        Attestation as ElectraAttestation,
+        SignedAggregateAndProof as ElectraSignedAggregateAndProof,
+        SignedBeaconBlock as ElectraBeaconBlock,
+    },
     nonstandard::Phase,
     phase0::{
         containers::{
-            Attestation, AttesterSlashing, ProposerSlashing, SignedAggregateAndProof,
+            Attestation as Phase0Attestation, AttesterSlashing, ProposerSlashing,
+            SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedBeaconBlock as Phase0SignedBeaconBlock, SignedVoluntaryExit,
         },
         primitives::{ForkDigest, SubnetId},
@@ -166,15 +174,55 @@ impl<P: Preset> PubsubMessage<P> {
                 // the ssz decoders
                 match gossip_topic.kind() {
                     GossipKind::BeaconAggregateAndProof => {
-                        let agg_and_proof = SignedAggregateAndProof::from_ssz_default(data)
-                            .map_err(|e| format!("{:?}", e))?;
-                        Ok(PubsubMessage::AggregateAndProofAttestation(Arc::new(
+                        let agg_and_proof =
+                            match fork_context.from_context_bytes(gossip_topic.fork_digest) {
+                                Some(Phase::Phase0)
+                                | Some(Phase::Altair)
+                                | Some(Phase::Bellatrix)
+                                | Some(Phase::Capella)
+                                | Some(Phase::Deneb) => SignedAggregateAndProof::Phase0(
+                                    Phase0SignedAggregateAndProof::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                Some(Phase::Electra) => SignedAggregateAndProof::Electra(
+                                    ElectraSignedAggregateAndProof::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                None => {
+                                    return Err(format!(
+                                        "Unknown gossipsub fork digest: {:?}",
+                                        gossip_topic.fork_digest
+                                    ))
+                                }
+                            };
+
+                        Ok(PubsubMessage::AggregateAndProofAttestation(Box::new(
                             agg_and_proof,
                         )))
                     }
                     GossipKind::Attestation(subnet_id) => {
                         let attestation =
-                            Attestation::from_ssz_default(data).map_err(|e| format!("{:?}", e))?;
+                            match fork_context.from_context_bytes(gossip_topic.fork_digest) {
+                                Some(Phase::Phase0)
+                                | Some(Phase::Altair)
+                                | Some(Phase::Bellatrix)
+                                | Some(Phase::Capella)
+                                | Some(Phase::Deneb) => Attestation::Phase0(
+                                    Phase0Attestation::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                Some(Phase::Electra) => Attestation::Electra(
+                                    ElectraAttestation::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                None => {
+                                    return Err(format!(
+                                        "Unknown gossipsub fork digest: {:?}",
+                                        gossip_topic.fork_digest
+                                    ))
+                                }
+                            };
+
                         Ok(PubsubMessage::Attestation(
                             *subnet_id,
                             Arc::new(attestation),
@@ -407,14 +455,16 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
             PubsubMessage::AggregateAndProofAttestation(att) => write!(
                 f,
                 "Aggregate and Proof: slot: {}, index: {}, aggregator_index: {}",
-                att.message.aggregate.data.slot,
-                att.message.aggregate.data.index,
-                att.message.aggregator_index,
+                att.message().aggregate().data().slot,
+                att.message().aggregate().data().index,
+                att.message().aggregator_index(),
             ),
             PubsubMessage::Attestation(subnet_id, attestation) => write!(
                 f,
                 "Attestation: subnet_id: {}, attestation_slot: {}, attestation_index: {}",
-                subnet_id, attestation.data.slot, attestation.data.index,
+                subnet_id,
+                attestation.data().slot,
+                attestation.data().index,
             ),
             PubsubMessage::VoluntaryExit(_data) => write!(f, "Voluntary Exit"),
             PubsubMessage::ProposerSlashing(_data) => write!(f, "Proposer Slashing"),
