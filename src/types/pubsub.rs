@@ -15,20 +15,20 @@ use types::{
     bellatrix::containers::SignedBeaconBlock as BellatrixBeaconBlock,
     capella::containers::{SignedBeaconBlock as CapellaBeaconBlock, SignedBlsToExecutionChange},
     combined::{
-        Attestation, LightClientFinalityUpdate, LightClientOptimisticUpdate,
+        Attestation, AttesterSlashing, LightClientFinalityUpdate, LightClientOptimisticUpdate,
         SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebBeaconBlock},
     electra::containers::{
-        Attestation as ElectraAttestation,
+        Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof,
         SignedBeaconBlock as ElectraBeaconBlock,
     },
     nonstandard::Phase,
     phase0::{
         containers::{
-            Attestation as Phase0Attestation, AttesterSlashing, ProposerSlashing,
-            SignedAggregateAndProof as Phase0SignedAggregateAndProof,
+            Attestation as Phase0Attestation, AttesterSlashing as Phase0AttesterSlashing,
+            ProposerSlashing, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedBeaconBlock as Phase0SignedBeaconBlock, SignedVoluntaryExit,
         },
         primitives::{ForkDigest, SubnetId},
@@ -296,8 +296,40 @@ impl<P: Preset> PubsubMessage<P> {
                         Ok(PubsubMessage::ProposerSlashing(Box::new(proposer_slashing)))
                     }
                     GossipKind::AttesterSlashing => {
-                        let attester_slashing = AttesterSlashing::from_ssz_default(data)
-                            .map_err(|e| format!("{:?}", e))?;
+                        let attester_slashing =
+                            match fork_context.from_context_bytes(gossip_topic.fork_digest) {
+                                Some(Phase::Phase0) => AttesterSlashing::Phase0(
+                                    Phase0AttesterSlashing::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                Some(Phase::Altair) => AttesterSlashing::Phase0(
+                                    Phase0AttesterSlashing::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                Some(Phase::Bellatrix) => AttesterSlashing::Phase0(
+                                    Phase0AttesterSlashing::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                Some(Phase::Capella) => AttesterSlashing::Phase0(
+                                    Phase0AttesterSlashing::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                Some(Phase::Deneb) => AttesterSlashing::Phase0(
+                                    Phase0AttesterSlashing::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                Some(Phase::Electra) => AttesterSlashing::Electra(
+                                    ElectraAttesterSlashing::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                ),
+                                None => {
+                                    return Err(format!(
+                                        "Unknown gossipsub fork digest: {:?}",
+                                        gossip_topic.fork_digest
+                                    ))
+                                }
+                            };
+
                         Ok(PubsubMessage::AttesterSlashing(Box::new(attester_slashing)))
                     }
                     GossipKind::SignedContributionAndProof => {
