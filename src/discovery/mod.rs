@@ -8,7 +8,6 @@ pub(crate) mod enr;
 pub mod enr_ext;
 
 // Allow external use of the ENR builder
-use crate::service::TARGET_SUBNET_PEERS;
 use crate::{metrics, ClearDialError};
 use crate::{Enr, NetworkConfig, NetworkGlobals, Subnet, SubnetDiscovery};
 use discv5::{enr::NodeId, Discv5};
@@ -687,16 +686,19 @@ impl Discovery {
                     .good_peers_on_subnet(subnet_query.subnet)
                     .count();
 
-                if peers_on_subnet >= TARGET_SUBNET_PEERS {
+                if peers_on_subnet >= self.network_globals.target_subnet_peers {
                     debug!(self.log, "Discovery ignored";
                         "reason" => "Already connected to desired peers",
                         "connected_peers_on_subnet" => peers_on_subnet,
-                        "target_subnet_peers" => TARGET_SUBNET_PEERS,
+                        "target_subnet_peers" => self.network_globals.target_subnet_peers,
                     );
                     return false;
                 }
 
-                let target_peers = TARGET_SUBNET_PEERS.saturating_sub(peers_on_subnet);
+                let target_peers = self
+                    .network_globals
+                    .target_subnet_peers
+                    .saturating_sub(peers_on_subnet);
                 trace!(self.log, "Discovery query started for subnet";
                     "subnet_query" => ?subnet_query,
                     "connected_peers_on_subnet" => peers_on_subnet,
@@ -1165,6 +1167,7 @@ mod tests {
             }),
             vec![],
             false,
+            3,
             &log,
         );
         let keypair = keypair.into();

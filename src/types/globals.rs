@@ -25,6 +25,8 @@ pub struct NetworkGlobals {
     pub sync_state: RwLock<SyncState>,
     /// The current state of the backfill sync.
     pub backfill_state: RwLock<BackFillState>,
+    /// Target subnet peers.
+    pub target_subnet_peers: usize,
 }
 
 impl NetworkGlobals {
@@ -33,6 +35,7 @@ impl NetworkGlobals {
         local_metadata: MetaData,
         trusted_peers: Vec<PeerId>,
         disable_peer_scoring: bool,
+        target_subnet_peers: usize,
         log: &slog::Logger,
     ) -> Self {
         NetworkGlobals {
@@ -44,6 +47,7 @@ impl NetworkGlobals {
             gossipsub_subscriptions: RwLock::new(HashSet::new()),
             sync_state: RwLock::new(SyncState::Stalled),
             backfill_state: RwLock::new(BackFillState::NotRequired),
+            target_subnet_peers,
         }
     }
 
@@ -129,6 +133,7 @@ impl NetworkGlobals {
             }),
             trusted_peers,
             false,
+            3,
             log,
         )
     }

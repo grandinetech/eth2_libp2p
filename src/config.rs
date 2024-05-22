@@ -69,6 +69,9 @@ pub struct Config {
     /// Target number of connected peers.
     pub target_peers: usize,
 
+    /// Target number of connected peers.
+    pub target_subnet_peers: usize,
+
     /// Gossipsub configuration parameters.
     #[serde(skip)]
     pub gs_config: gossipsub::Config,
@@ -336,6 +339,7 @@ impl Default for Config {
             enr_quic6_port: None,
             enr_tcp6_port: None,
             target_peers: 100,
+            target_subnet_peers: 3,
             gs_config,
             discv5_config,
             boot_nodes_enr: vec![],

@@ -61,8 +61,6 @@ mod behaviour;
 mod gossip_cache;
 pub mod gossipsub_scoring_parameters;
 pub mod utils;
-/// The number of peers we target per subnet for discovery queries.
-pub const TARGET_SUBNET_PEERS: usize = 6;
 
 const MAX_IDENTIFY_ADDRESSES: usize = 10;
 
@@ -181,6 +179,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                 meta_data,
                 trusted_peers,
                 config.disable_peer_scoring,
+                config.target_subnet_peers,
                 &log,
             );
             Arc::new(globals)
@@ -1047,14 +1046,14 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     .read()
                     .good_peers_on_subnet(s.subnet)
                     .count();
-                if peers_on_subnet >= TARGET_SUBNET_PEERS {
+                if peers_on_subnet >= self.network_globals.target_subnet_peers {
                     trace!(
                         self.log,
                         "Discovery query ignored";
                         "subnet" => ?s.subnet,
                         "reason" => "Already connected to desired peers",
                         "connected_peers_on_subnet" => peers_on_subnet,
-                        "target_subnet_peers" => TARGET_SUBNET_PEERS,
+                        "target_subnet_peers" => self.network_globals.target_subnet_peers,
                     );
                     false
                 // Queue an outgoing connection request to the cached peers that are on `s.subnet_id`.

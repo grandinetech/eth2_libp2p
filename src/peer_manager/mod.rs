@@ -3,7 +3,6 @@
 use crate::common::time_cache::LRUTimeCache;
 use crate::discovery::enr_ext::EnrExt;
 use crate::rpc::{GoodbyeReason, MetaData, Protocol, RPCError, RPCResponseErrorCode};
-use crate::service::TARGET_SUBNET_PEERS;
 use crate::{metrics, Gossipsub};
 use crate::{NetworkGlobals, PeerId};
 use crate::{Subnet, SubnetDiscovery};
@@ -835,7 +834,7 @@ impl PeerManager {
                     .read()
                     .good_peers_on_subnet(Subnet::SyncCommittee(*k))
                     .count()
-                    < TARGET_SUBNET_PEERS
+                    < self.network_globals.target_subnet_peers
                 {
                     Some(SubnetDiscovery {
                         subnet: Subnet::SyncCommittee(*k),
