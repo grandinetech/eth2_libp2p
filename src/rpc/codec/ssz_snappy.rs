@@ -707,6 +707,11 @@ fn handle_rpc_response<P: Preset>(
                     .map(LightClientOptimisticUpdate::Deneb)
                     .map(Arc::new)?,
             ))),
+            Some(Phase::Electra) => Ok(Some(RPCResponse::LightClientOptimisticUpdate(
+                SszReadDefault::from_ssz_default(decoded_buffer)
+                    .map(LightClientOptimisticUpdate::Electra)
+                    .map(Arc::new)?,
+            ))),
             None => Err(RPCError::ErrorResponse(
                 RPCResponseErrorCode::InvalidRequest,
                 format!(
@@ -735,6 +740,11 @@ fn handle_rpc_response<P: Preset>(
             Some(Phase::Deneb) => Ok(Some(RPCResponse::LightClientFinalityUpdate(
                 SszReadDefault::from_ssz_default(decoded_buffer)
                     .map(LightClientFinalityUpdate::Deneb)
+                    .map(Arc::new)?,
+            ))),
+            Some(Phase::Electra) => Ok(Some(RPCResponse::LightClientFinalityUpdate(
+                SszReadDefault::from_ssz_default(decoded_buffer)
+                    .map(LightClientFinalityUpdate::Electra)
                     .map(Arc::new)?,
             ))),
             None => Err(RPCError::ErrorResponse(
