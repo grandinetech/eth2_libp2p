@@ -196,7 +196,7 @@ impl<P: Preset> PubsubMessage<P> {
                                 }
                             };
 
-                        Ok(PubsubMessage::AggregateAndProofAttestation(Box::new(
+                        Ok(PubsubMessage::AggregateAndProofAttestation(Arc::new(
                             agg_and_proof,
                         )))
                     }
