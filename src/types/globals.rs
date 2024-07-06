@@ -150,7 +150,7 @@ impl NetworkGlobals {
 mod test {
     use slog::{o, Drain};
     use typenum::Unsigned as _;
-    use types::eip7594::{NumberOfColumns, DATA_COLUMN_SIDECAR_SUBNET_COUNT};
+    use types::eip7594::{NumberOfColumns, CUSTODY_REQUIREMENT, DATA_COLUMN_SIDECAR_SUBNET_COUNT};
 
     use crate::NetworkGlobals;
 
@@ -170,7 +170,7 @@ mod test {
     fn test_custody_count_default() {
         let log = build_log(slog::Level::Debug, false);
         let default_custody_requirement_column_count =
-            NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT;
+            NumberOfColumns::U64 / DATA_COLUMN_SIDECAR_SUBNET_COUNT * CUSTODY_REQUIREMENT;
 
         let globals = NetworkGlobals::new_test_globals(vec![], &log);
         let any_epoch = 0;
