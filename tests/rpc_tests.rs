@@ -16,6 +16,7 @@ use types::{
         ExecutionPayload, SignedBeaconBlock as BellatrixSignedBeaconBlock,
     },
     config::Config,
+    deneb::containers::BlobSidecar as DenebBlobSidecar,
     nonstandard::Phase,
     phase0::{
         containers::SignedBeaconBlock as Phase0SignedBeaconBlock,
@@ -330,7 +331,7 @@ async fn test_blobs_by_range_chunked_rpc() {
     });
 
     // BlocksByRange Response
-    let blob = BlobSidecar::<Mainnet>::default();
+    let blob = DenebBlobSidecar::default().into();
 
     let rpc_response = Response::BlobsByRange(Some(Arc::new(blob)));
 
