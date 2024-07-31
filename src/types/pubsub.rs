@@ -16,10 +16,10 @@ use types::{
     bellatrix::containers::SignedBeaconBlock as BellatrixBeaconBlock,
     capella::containers::{SignedBeaconBlock as CapellaBeaconBlock, SignedBlsToExecutionChange},
     combined::{
-        Attestation, AttesterSlashing, LightClientFinalityUpdate, LightClientOptimisticUpdate,
-        SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttesterSlashing, BlobSidecar, LightClientFinalityUpdate,
+        LightClientOptimisticUpdate, SignedAggregateAndProof, SignedBeaconBlock,
     },
-    deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebBeaconBlock},
+    deneb::containers::SignedBeaconBlock as DenebBeaconBlock,
     eip7594::DataColumnSidecar,
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
@@ -273,11 +273,23 @@ impl<P: Preset> PubsubMessage<P> {
                     }
                     GossipKind::BlobSidecar(blob_index) => {
                         match fork_context.from_context_bytes(gossip_topic.fork_digest) {
-                            Some(Phase::Deneb | Phase::Electra) => {
-                                let blob_sidecar = Arc::new(
-                                    BlobSidecar::from_ssz_default(data)
-                                        .map_err(|e| format!("{:?}", e))?,
-                                );
+                            Some(Phase::Deneb) => {
+                                let blob_sidecar = SszReadDefault::from_ssz_default(data)
+                                    .map(BlobSidecar::Deneb)
+                                    .map(Arc::new)
+                                    .map_err(|e| format!("{:?}", e))?;
+
+                                Ok(PubsubMessage::BlobSidecar(Box::new((
+                                    *blob_index,
+                                    blob_sidecar,
+                                ))))
+                            }
+                            Some(Phase::Electra) => {
+                                let blob_sidecar = SszReadDefault::from_ssz_default(data)
+                                    .map(BlobSidecar::Electra)
+                                    .map(Arc::new)
+                                    .map_err(|e| format!("{:?}", e))?;
+
                                 Ok(PubsubMessage::BlobSidecar(Box::new((
                                     *blob_index,
                                     blob_sidecar,
@@ -520,7 +532,8 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
             PubsubMessage::BlobSidecar(data) => write!(
                 f,
                 "BlobSidecar: slot: {}, blob index: {}",
-                data.1.signed_block_header.message.slot, data.1.index,
+                data.1.signed_block_header().message.slot,
+                data.1.index(),
             ),
             PubsubMessage::DataColumnSidecar(data) => write!(
                 f,

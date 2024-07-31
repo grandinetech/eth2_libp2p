@@ -20,10 +20,10 @@ use types::{
     bellatrix::containers::SignedBeaconBlock as BellatrixSignedBeaconBlock,
     capella::containers::SignedBeaconBlock as CapellaSignedBeaconBlock,
     combined::{
-        LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
+        BlobSidecar, LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
         SignedBeaconBlock,
     },
-    deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebSignedBeaconBlock},
+    deneb::containers::SignedBeaconBlock as DenebSignedBeaconBlock,
     electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
     nonstandard::Phase,
     phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::ForkDigest},
@@ -613,9 +613,18 @@ fn handle_rpc_response<P: Preset>(
             SignedBeaconBlock::Phase0(Phase0SignedBeaconBlock::from_ssz_default(decoded_buffer)?),
         )))),
         SupportedProtocol::BlobsByRangeV1 => match fork_name {
-            Some(Phase::Deneb) => Ok(Some(RPCResponse::BlobsByRange(Arc::new(
-                BlobSidecar::from_ssz_default(decoded_buffer)?,
-            )))),
+            Some(Phase::Deneb) => SszReadDefault::from_ssz_default(decoded_buffer)
+                .map(BlobSidecar::Deneb)
+                .map(Arc::new)
+                .map(RPCResponse::BlobsByRange)
+                .map(Some)
+                .map_err(Into::into),
+            Some(Phase::Electra) => SszReadDefault::from_ssz_default(decoded_buffer)
+                .map(BlobSidecar::Electra)
+                .map(Arc::new)
+                .map(RPCResponse::BlobsByRange)
+                .map(Some)
+                .map_err(Into::into),
             Some(_) => Err(RPCError::ErrorResponse(
                 RPCResponseErrorCode::InvalidRequest,
                 "Invalid fork name for blobs by range".to_string(),
@@ -629,9 +638,18 @@ fn handle_rpc_response<P: Preset>(
             )),
         },
         SupportedProtocol::BlobsByRootV1 => match fork_name {
-            Some(Phase::Deneb) => Ok(Some(RPCResponse::BlobsByRoot(Arc::new(
-                BlobSidecar::from_ssz_default(decoded_buffer)?,
-            )))),
+            Some(Phase::Deneb) => SszReadDefault::from_ssz_default(decoded_buffer)
+                .map(BlobSidecar::Deneb)
+                .map(Arc::new)
+                .map(RPCResponse::BlobsByRoot)
+                .map(Some)
+                .map_err(Into::into),
+            Some(Phase::Electra) => SszReadDefault::from_ssz_default(decoded_buffer)
+                .map(BlobSidecar::Electra)
+                .map(Arc::new)
+                .map(RPCResponse::BlobsByRoot)
+                .map(Some)
+                .map_err(Into::into),
             Some(_) => Err(RPCError::ErrorResponse(
                 RPCResponseErrorCode::InvalidRequest,
                 "Invalid fork name for blobs by root".to_string(),
@@ -877,7 +895,7 @@ mod tests {
         },
         combined::SignedBeaconBlock,
         config::Config,
-        deneb::containers::BlobIdentifier,
+        deneb::containers::{BlobIdentifier, BlobSidecar as DenebBlobSidecar},
         phase0::primitives::{ForkDigest, H256},
         preset::Mainnet,
     };
@@ -895,8 +913,8 @@ mod tests {
         factory::empty_phase0_signed_beacon_block().into()
     }
 
-    fn empty_blob_sidecar<P: Preset>() -> Arc<BlobSidecar<P>> {
-        Arc::new(BlobSidecar::default())
+    fn empty_deneb_blob_sidecar<P: Preset>() -> Arc<BlobSidecar<P>> {
+        Arc::new(DenebBlobSidecar::default().into())
     }
 
     /// Bellatrix block with length < max_rpc_size.
@@ -1258,20 +1276,20 @@ mod tests {
             encode_then_decode_response::<Mainnet>(
                 &config,
                 SupportedProtocol::BlobsByRangeV1,
-                RPCCodedResponse::Success(RPCResponse::BlobsByRange(empty_blob_sidecar())),
+                RPCCodedResponse::Success(RPCResponse::BlobsByRange(empty_deneb_blob_sidecar())),
                 Phase::Deneb,
             ),
-            Ok(Some(RPCResponse::BlobsByRange(empty_blob_sidecar()))),
+            Ok(Some(RPCResponse::BlobsByRange(empty_deneb_blob_sidecar()))),
         );
 
         assert_eq!(
             encode_then_decode_response::<Mainnet>(
                 &config,
                 SupportedProtocol::BlobsByRootV1,
-                RPCCodedResponse::Success(RPCResponse::BlobsByRoot(empty_blob_sidecar())),
+                RPCCodedResponse::Success(RPCResponse::BlobsByRoot(empty_deneb_blob_sidecar())),
                 Phase::Deneb,
             ),
-            Ok(Some(RPCResponse::BlobsByRoot(empty_blob_sidecar()))),
+            Ok(Some(RPCResponse::BlobsByRoot(empty_deneb_blob_sidecar()))),
         );
     }
 

@@ -14,10 +14,9 @@ use typenum::{Unsigned as _, U1024, U128, U256, U768};
 use types::deneb::containers::BlobIdentifier;
 use types::{
     combined::{
-        LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
+        BlobSidecar, LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
         SignedBeaconBlock,
     },
-    deneb::containers::BlobSidecar,
     phase0::primitives::{Epoch, ForkDigest, Slot, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -696,14 +695,14 @@ impl<P: Preset> std::fmt::Display for RPCResponse<P> {
                 write!(
                     f,
                     "BlobsByRange: Blob slot: {}",
-                    blob.signed_block_header.message.slot
+                    blob.signed_block_header().message.slot
                 )
             }
             RPCResponse::BlobsByRoot(sidecar) => {
                 write!(
                     f,
                     "BlobsByRoot: Blob slot: {}",
-                    sidecar.signed_block_header.message.slot
+                    sidecar.signed_block_header().message.slot
                 )
             }
             RPCResponse::Pong(ping) => write!(f, "Pong: {}", ping.data),

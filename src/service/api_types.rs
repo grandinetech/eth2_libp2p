@@ -3,10 +3,9 @@ use std::sync::Arc;
 use libp2p::swarm::ConnectionId;
 use types::{
     combined::{
-        LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
+        BlobSidecar, LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
         SignedBeaconBlock,
     },
-    deneb::containers::BlobSidecar,
     preset::Preset,
 };
 
