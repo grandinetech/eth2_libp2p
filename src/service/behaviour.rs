@@ -1,6 +1,6 @@
 use crate::discovery::Discovery;
 use crate::peer_manager::PeerManager;
-use crate::rpc::RPC;
+use crate::rpc::{ReqId, RPC};
 use crate::types::SnappyTransform;
 
 use gossipsub;
@@ -17,8 +17,9 @@ pub type SubscriptionFilter =
 pub type Gossipsub = gossipsub::Behaviour<SnappyTransform, SubscriptionFilter>;
 
 #[derive(NetworkBehaviour)]
-pub(crate) struct Behaviour<P>
+pub(crate) struct Behaviour<AppReqId, P>
 where
+    AppReqId: ReqId,
     P: Preset,
 {
     /// Keep track of active and pending connections to enforce hard limits.
@@ -26,7 +27,7 @@ where
     /// The peer manager that keeps track of peer's reputation and status.
     pub peer_manager: PeerManager,
     /// The Eth2 RPC specified in the wire-0 protocol.
-    pub eth2_rpc: RPC<RequestId, P>,
+    pub eth2_rpc: RPC<RequestId<AppReqId>, P>,
     /// Discv5 Discovery protocol.
     pub discovery: Discovery,
     /// Keep regular connection to peers and disconnect if absent.
