@@ -212,7 +212,7 @@ mod tests {
     use crate::rpc::rate_limiter::Quota;
     use crate::rpc::self_limiter::SelfRateLimiter;
     use crate::rpc::{OutboundRequest, Ping, Protocol};
-    use crate::service::api_types::RequestId;
+    use crate::service::api_types::{AppRequestId, RequestId, SyncRequestId};
     use libp2p::PeerId;
     use slog::{o, Drain};
     use std::time::Duration;
@@ -238,15 +238,17 @@ mod tests {
             ping_quota: Quota::n_every(1, 2),
             ..Default::default()
         });
-        let mut limiter: SelfRateLimiter<RequestId<u64>, Mainnet> =
+        let mut limiter: SelfRateLimiter<RequestId, Mainnet> =
             SelfRateLimiter::new(config, log).unwrap();
         let peer_id = PeerId::random();
 
-        for i in 1..=5 {
+        for i in 1..=5u32 {
             let _ = limiter.allows(
                 peer_id,
-                RequestId::Application(i),
-                OutboundRequest::Ping(Ping { data: i }),
+                RequestId::Application(AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs {
+                    id: i,
+                })),
+                OutboundRequest::Ping(Ping { data: i as u64 }),
             );
         }
 
@@ -259,8 +261,13 @@ mod tests {
 
             // Check that requests in the queue are ordered in the sequence 2, 3, 4, 5.
             let mut iter = queue.iter();
-            for i in 2..=5 {
-                assert_eq!(iter.next().unwrap().request_id, RequestId::Application(i));
+            for i in 2..=5u32 {
+                assert!(matches!(
+                    iter.next().unwrap().request_id,
+                    RequestId::Application(AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs {
+                        id,
+                    })) if id == i
+                ));
             }
 
             assert_eq!(limiter.ready_requests.len(), 0);
@@ -280,7 +287,12 @@ mod tests {
             // Check that requests in the queue are ordered in the sequence 3, 4, 5.
             let mut iter = queue.iter();
             for i in 3..=5 {
-                assert_eq!(iter.next().unwrap().request_id, RequestId::Application(i));
+                assert!(matches!(
+                    iter.next().unwrap().request_id,
+                    RequestId::Application(AppRequestId::Sync(SyncRequestId::RangeBlockAndBlobs {
+                        id
+                    })) if id == i
+                ));
             }
 
             assert_eq!(limiter.ready_requests.len(), 1);
