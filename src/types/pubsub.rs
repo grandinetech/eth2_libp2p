@@ -294,16 +294,15 @@ impl<P: Preset> PubsubMessage<P> {
                     }
                     GossipKind::DataColumnSidecar(subnet_id) => {
                         match fork_context.from_context_bytes(gossip_topic.fork_digest) {
-                            // TODO(das): Remove Deneb fork
-                            Some(fork) if *fork >= Phase::Deneb => {
+                            Some(_fork) => {
+                                // Load the DataColumnSidecar regardless of the specific fork phase
                                 let col_sidecar = Arc::new(
                                     DataColumnSidecar::from_ssz_default(data)
                                         .map_err(|e| format!("{:?}", e))?,
                                 );
-                                let sidecar_epoch =
-                                    misc::compute_epoch_at_slot::<P>(col_sidecar.slot());
-                                let peer_das_enabled =
-                                    sidecar_epoch >= fork_context.chain_config().eip7594_fork_epoch;
+                                let sidecar_epoch = misc::compute_epoch_at_slot::<P>(col_sidecar.slot());
+                                let peer_das_enabled = sidecar_epoch >= fork_context.chain_config().eip7594_fork_epoch;
+                    
                                 if peer_das_enabled {
                                     Ok(PubsubMessage::DataColumnSidecar(Box::new((
                                         *subnet_id,
@@ -316,8 +315,8 @@ impl<P: Preset> PubsubMessage<P> {
                                     ))
                                 }
                             }
-                            Some(_) | None => Err(format!(
-                                "data_column_sidecar topic invalid for given fork digest {:?}",
+                            None => Err(format!(
+                                "data_column_sidecar topic invalid for unknown fork digest {:?}",
                                 gossip_topic.fork_digest
                             )),
                         }
