@@ -41,9 +41,7 @@ use std::num::{NonZeroU8, NonZeroUsize};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-
 use typenum::Unsigned as _;
-use types::deneb::consts::BlobSidecarSubnetCount;
 
 use std::time::Duration;
 use std::usize;
@@ -213,8 +211,21 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             &log,
         )?;
 
+        // construct the metadata
+        let custody_subnet_count = chain_config.is_eip7594_fork_epoch_set().then(|| {
+            if config.subscribe_all_data_column_subnets {
+                chain_config.data_column_sidecar_subnet_count
+            } else {
+                chain_config.custody_requirement
+            }
+        });
+
         // Construct the metadata
-        let meta_data = utils::load_or_build_metadata(config.network_dir.as_deref(), &log);
+        let meta_data = utils::load_or_build_metadata(
+            config.network_dir.as_deref(),
+            custody_subnet_count,
+            &log,
+        );
         let seq_number = meta_data.seq_number();
         let globals = NetworkGlobals::new(
             chain_config.clone_arc(),
@@ -299,7 +310,8 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
 
             let max_topics = AttestationSubnetCount::USIZE
                 + SyncCommitteeSubnetCount::USIZE
-                + BlobSidecarSubnetCount::USIZE
+                + chain_config.blob_sidecar_subnet_count as usize
+                + chain_config.data_column_sidecar_subnet_count as usize
                 + BASE_CORE_TOPICS.len()
                 + ALTAIR_CORE_TOPICS.len()
                 + CAPELLA_CORE_TOPICS.len()
@@ -311,11 +323,12 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     possible_fork_digests,
                     AttestationSubnetCount::U64,
                     SyncCommitteeSubnetCount::U64,
-                    BlobSidecarSubnetCount::U64,
+                    chain_config.blob_sidecar_subnet_count,
+                    chain_config.data_column_sidecar_subnet_count,
                 ),
                 // during a fork we subscribe to both the old and new topics
                 max_subscribed_topics: max_topics * 4,
-                // 162 in theory = (64 attestation + 4 sync committee + 7 core topics + 6 blob topics) * 2
+                // 418 in theory = (64 attestation + 4 sync committee + 7 core topics + 6 blob topics + 128 column topics) * 2
                 max_subscriptions_per_request: max_topics * 2,
             };
 
@@ -728,7 +741,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         }
 
         // Subscribe to core topics for the new fork
-        for kind in fork_core_topics(&phase) {
+        for kind in fork_core_topics(&self.network_globals.config, &phase) {
             let topic = GossipTopic::new(kind, GossipEncoding::default(), new_fork_digest);
             self.subscribe(topic);
         }
@@ -1182,8 +1195,14 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
 
     /// Sends a METADATA request to a peer.
     fn send_meta_data_request(&mut self, peer_id: PeerId) {
-        // We always prefer sending V2 requests
-        let event = RequestType::MetaData(MetadataRequest::new_v2());
+        let event = if self.network_globals.config.is_eip7594_fork_epoch_set() {
+            // Nodes with higher custody will probably start advertising it
+            // before peerdas is activated
+            RequestType::MetaData(MetadataRequest::new_v3())
+        } else {
+            // We always prefer sending V2 requests otherwise
+            RequestType::MetaData(MetadataRequest::new_v2())
+        };
         self.eth2_rpc_mut()
             .send_request(peer_id, RequestId::Internal, event);
     }
@@ -1539,6 +1558,28 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                             request,
                         })
                     }
+                    RequestType::DataColumnsByRoot(_) => {
+                        metrics::inc_counter_vec(
+                            &metrics::TOTAL_RPC_REQUESTS,
+                            &["data_columns_by_root"],
+                        );
+                        Some(NetworkEvent::RequestReceived {
+                            peer_id,
+                            id: (connection_id, request.substream_id),
+                            request,
+                        })
+                    }
+                    RequestType::DataColumnsByRange(_) => {
+                        metrics::inc_counter_vec(
+                            &metrics::TOTAL_RPC_REQUESTS,
+                            &["data_columns_by_range"],
+                        );
+                        Some(NetworkEvent::RequestReceived {
+                            peer_id,
+                            id: (connection_id, request.substream_id),
+                            request,
+                        })
+                    }
                     RequestType::LightClientBootstrap(_) => {
                         metrics::inc_counter_vec(
                             &metrics::TOTAL_RPC_REQUESTS,
@@ -1565,6 +1606,17 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                         metrics::inc_counter_vec(
                             &metrics::TOTAL_RPC_REQUESTS,
                             &["light_client_finality_update"],
+                        );
+                        Some(NetworkEvent::RequestReceived {
+                            peer_id,
+                            id: (connection_id, request.substream_id),
+                            request,
+                        })
+                    }
+                    RequestType::LightClientUpdatesByRange(_) => {
+                        metrics::inc_counter_vec(
+                            &metrics::TOTAL_RPC_REQUESTS,
+                            &["light_client_updates_by_range"],
                         );
                         Some(NetworkEvent::RequestReceived {
                             peer_id,
@@ -1605,6 +1657,12 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     RpcSuccessResponse::BlobsByRoot(resp) => {
                         self.build_response(id, peer_id, Response::BlobsByRoot(Some(resp)))
                     }
+                    RpcSuccessResponse::DataColumnsByRoot(resp) => {
+                        self.build_response(id, peer_id, Response::DataColumnsByRoot(Some(resp)))
+                    }
+                    RpcSuccessResponse::DataColumnsByRange(resp) => {
+                        self.build_response(id, peer_id, Response::DataColumnsByRange(Some(resp)))
+                    }
                     // Should never be reached
                     RpcSuccessResponse::LightClientBootstrap(bootstrap) => {
                         self.build_response(id, peer_id, Response::LightClientBootstrap(bootstrap))
@@ -1619,6 +1677,11 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                         peer_id,
                         Response::LightClientFinalityUpdate(update),
                     ),
+                    RpcSuccessResponse::LightClientUpdatesByRange(update) => self.build_response(
+                        id,
+                        peer_id,
+                        Response::LightClientUpdatesByRange(Some(update)),
+                    ),
                 }
             }
             Ok(RPCReceived::EndOfStream(id, termination)) => {
@@ -1627,6 +1690,11 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     ResponseTermination::BlocksByRoot => Response::BlocksByRoot(None),
                     ResponseTermination::BlobsByRange => Response::BlobsByRange(None),
                     ResponseTermination::BlobsByRoot => Response::BlobsByRoot(None),
+                    ResponseTermination::DataColumnsByRoot => Response::DataColumnsByRoot(None),
+                    ResponseTermination::DataColumnsByRange => Response::DataColumnsByRange(None),
+                    ResponseTermination::LightClientUpdatesByRange => {
+                        Response::LightClientUpdatesByRange(None)
+                    }
                 };
                 self.build_response(id, peer_id, response)
             }

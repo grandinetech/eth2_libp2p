@@ -5,7 +5,7 @@ use strum::AsRefStr;
 use typenum::Unsigned as _;
 use types::{
     altair::consts::SyncCommitteeSubnetCount,
-    deneb::consts::BlobSidecarSubnetCount,
+    config::Config as ChainConfig,
     nonstandard::Phase,
     phase0::{
         consts::AttestationSubnetCount,
@@ -54,7 +54,7 @@ pub const LIGHT_CLIENT_GOSSIP_TOPICS: [GossipKind; 2] = [
 ];
 
 /// Returns the core topics associated with each fork that are new to the previous fork
-pub fn fork_core_topics(phase: &Phase) -> Vec<GossipKind> {
+pub fn fork_core_topics(chain_config: &ChainConfig, phase: &Phase) -> Vec<GossipKind> {
     match phase {
         Phase::Phase0 => BASE_CORE_TOPICS.to_vec(),
         Phase::Altair => ALTAIR_CORE_TOPICS.to_vec(),
@@ -63,7 +63,7 @@ pub fn fork_core_topics(phase: &Phase) -> Vec<GossipKind> {
         Phase::Deneb => {
             // All of deneb blob topics are core topics
             let mut deneb_blob_topics = Vec::new();
-            for i in 0..BlobSidecarSubnetCount::U64 {
+            for i in 0..chain_config.blob_sidecar_subnet_count {
                 deneb_blob_topics.push(GossipKind::BlobSidecar(i));
             }
             let mut deneb_topics = DENEB_CORE_TOPICS.to_vec();
@@ -87,10 +87,13 @@ pub fn attestation_sync_committee_topics() -> impl Iterator<Item = GossipKind> {
 
 /// Returns all the topics that we need to subscribe to for a given fork
 /// including topics from older forks and new topics for the current fork.
-pub fn core_topics_to_subscribe(mut current_phase: Phase) -> Vec<GossipKind> {
-    let mut topics = fork_core_topics(&current_phase);
+pub fn core_topics_to_subscribe(
+    chain_config: &ChainConfig,
+    mut current_phase: Phase,
+) -> Vec<GossipKind> {
+    let mut topics = fork_core_topics(chain_config, &current_phase);
     while let Some(previous_phase) = previous(&current_phase) {
-        let previous_phase_topics = fork_core_topics(&previous_phase);
+        let previous_phase_topics = fork_core_topics(chain_config, &previous_phase);
         topics.extend(previous_phase_topics);
         current_phase = previous_phase;
     }
@@ -459,14 +462,18 @@ mod tests {
 
     #[test]
     fn test_core_topics_to_subscribe() {
+        let chain_config = ChainConfig::mainnet();
         let mut all_topics = Vec::new();
-        let mut deneb_core_topics = fork_core_topics(&Phase::Deneb);
+        let mut deneb_core_topics = fork_core_topics(&chain_config, &Phase::Deneb);
         all_topics.append(&mut deneb_core_topics);
         all_topics.extend(CAPELLA_CORE_TOPICS);
         all_topics.extend(ALTAIR_CORE_TOPICS);
         all_topics.extend(BASE_CORE_TOPICS);
 
         let latest_fork = enum_iterator::all().last().unwrap();
-        assert_eq!(core_topics_to_subscribe(latest_fork), all_topics);
+        assert_eq!(
+            core_topics_to_subscribe(&chain_config, latest_fork),
+            all_topics
+        );
     }
 }

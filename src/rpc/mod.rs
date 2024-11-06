@@ -25,7 +25,9 @@ use types::preset::Preset;
 use crate::types::ForkContext;
 
 pub(crate) use handler::{HandlerErr, HandlerEvent};
-pub(crate) use methods::{MetaData, MetaDataV2, Ping, RpcResponse, RpcSuccessResponse};
+pub(crate) use methods::{
+    MetaData, MetaDataV1, MetaDataV2, MetaDataV3, Ping, RpcResponse, RpcSuccessResponse,
+};
 pub use protocol::RequestType;
 
 pub use handler::SubstreamId;
@@ -415,8 +417,10 @@ where
                                 protocol,
                                 Protocol::BlocksByRange
                                     | Protocol::BlobsByRange
+                                    | Protocol::DataColumnsByRange
                                     | Protocol::BlocksByRoot
                                     | Protocol::BlobsByRoot
+                                    | Protocol::DataColumnsByRoot
                             ) {
                                 debug!(self.log, "Request too large to process"; "request" => %r#type, "protocol" => %protocol);
                             } else {
@@ -549,6 +553,11 @@ where
                             ResponseTermination::BlocksByRoot => Protocol::BlocksByRoot,
                             ResponseTermination::BlobsByRange => Protocol::BlobsByRange,
                             ResponseTermination::BlobsByRoot => Protocol::BlobsByRoot,
+                            ResponseTermination::DataColumnsByRoot => Protocol::DataColumnsByRoot,
+                            ResponseTermination::DataColumnsByRange => Protocol::DataColumnsByRange,
+                            ResponseTermination::LightClientUpdatesByRange => {
+                                Protocol::LightClientUpdatesByRange
+                            }
                         },
                     ),
                 };

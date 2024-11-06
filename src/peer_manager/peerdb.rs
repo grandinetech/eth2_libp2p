@@ -1,5 +1,7 @@
-use crate::discovery::CombinedKey;
-use crate::{metrics, multiaddr::Multiaddr, types::Subnet, Enr, Gossipsub, PeerId};
+use crate::discovery::enr::PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY;
+use crate::discovery::{peer_id_to_node_id, CombinedKey};
+use crate::eip7594::compute_custody_subnets;
+use crate::{metrics, multiaddr::Multiaddr, types::Subnet, Enr, EnrExt, Gossipsub, PeerId};
 use itertools::Itertools as _;
 use peer_info::{ConnectionDirection, PeerConnectionStatus, PeerInfo};
 use score::{PeerAction, ReportSource, Score, ScoreState};
@@ -10,8 +12,11 @@ use std::{cmp::Ordering, fmt::Display};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Formatter,
+    sync::Arc,
 };
 use sync_status::SyncStatus;
+use types::config::Config as ChainConfig;
+use types::phase0::primitives::SubnetId;
 
 pub mod client;
 pub mod peer_info;
@@ -32,6 +37,7 @@ const DIAL_TIMEOUT: u64 = 15;
 
 /// Storage of known peers, their reputation and information
 pub struct PeerDB {
+    chain_config: Arc<ChainConfig>,
     /// The collection of known connected peers, their status and reputation
     peers: HashMap<PeerId, PeerInfo>,
     /// The number of disconnected nodes in the database.
@@ -45,13 +51,19 @@ pub struct PeerDB {
 }
 
 impl PeerDB {
-    pub fn new(trusted_peers: Vec<PeerId>, disable_peer_scoring: bool, log: &slog::Logger) -> Self {
+    pub fn new(
+        chain_config: Arc<ChainConfig>,
+        trusted_peers: Vec<PeerId>,
+        disable_peer_scoring: bool,
+        log: &slog::Logger,
+    ) -> Self {
         // Initialize the peers hashmap with trusted peers
         let peers = trusted_peers
             .into_iter()
             .map(|peer_id| (peer_id, PeerInfo::trusted_peer_info()))
             .collect();
         Self {
+            chain_config,
             log: log.clone(),
             disconnected_peers: 0,
             banned_peers_count: BannedPeersCount::default(),
@@ -248,6 +260,19 @@ impl PeerDB {
                     && info.on_subnet_metadata(&subnet)
                     && info.on_subnet_gossipsub(&subnet)
                     && info.is_good_gossipsub_peer()
+            })
+            .map(|(peer_id, _)| peer_id)
+    }
+
+    /// Returns an iterator of all good gossipsub peers that are supposed to be custodying
+    /// the given subnet id.
+    pub fn good_custody_subnet_peer(&self, subnet: SubnetId) -> impl Iterator<Item = &PeerId> {
+        self.peers
+            .iter()
+            .filter(move |(_, info)| {
+                // The custody_subnets hashset can be populated via enr or metadata
+                let is_custody_subnet_peer = info.is_assigned_to_custody_subnet(&subnet);
+                info.is_connected() && info.is_good_gossipsub_peer() && is_custody_subnet_peer
             })
             .map(|(peer_id, _)| peer_id)
     }
@@ -673,17 +698,46 @@ impl PeerDB {
     }
 
     /// Updates the connection state. MUST ONLY BE USED IN TESTS.
-    pub fn __add_connected_peer_testing_only(&mut self, peer_id: &PeerId) -> Option<BanOperation> {
+    pub fn __add_connected_peer_testing_only(&mut self, supernode: bool) -> PeerId {
         let enr_key = CombinedKey::generate_secp256k1();
-        let enr = Enr::builder().build(&enr_key).unwrap();
+        let mut enr = Enr::builder().build(&enr_key).unwrap();
+        let peer_id = enr.peer_id();
+
+        if supernode {
+            enr.insert(
+                PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY,
+                &self.chain_config.data_column_sidecar_subnet_count,
+                &enr_key,
+            )
+            .expect("u64 can be encoded");
+        }
+
         self.update_connection_state(
-            peer_id,
+            &peer_id,
             NewConnectionState::Connected {
                 enr: Some(enr),
                 seen_address: Multiaddr::empty(),
                 direction: ConnectionDirection::Outgoing,
             },
-        )
+        );
+
+        if supernode {
+            let peer_info = self.peers.get_mut(&peer_id).expect("peer exists");
+            let all_subnets = (0..self.chain_config.data_column_sidecar_subnet_count)
+                .map(|csc| csc.into())
+                .collect();
+            peer_info.set_custody_subnets(all_subnets);
+        } else {
+            let peer_info = self.peers.get_mut(&peer_id).expect("peer exists");
+            let node_id = peer_id_to_node_id(&peer_id).expect("convert peer_id to node_id");
+            let subnets =
+                compute_custody_subnets(node_id.raw(), self.chain_config.custody_requirement)
+                    .expect("should compute custody subnets")
+                    .collect();
+            peer_info.set_custody_subnets(subnets);
+        }
+
+        peer_id
     }
 
     /// The connection state of the peer has been changed. Modify the peer in the db to ensure all
@@ -746,7 +800,7 @@ impl PeerDB {
                     seen_address,
                 },
             ) => {
-                // Update the ENR if one exists
+                // Update the ENR if one exists, and compute the custody subnets
                 if let Some(enr) = enr {
                     info.set_enr(enr);
                 }
@@ -1295,7 +1349,8 @@ mod tests {
 
     fn get_db() -> PeerDB {
         let log = build_log(slog::Level::Debug, false);
-        PeerDB::new(vec![], false, &log)
+        let config = Arc::new(ChainConfig::mainnet());
+        PeerDB::new(config, vec![], false, &log)
     }
 
     #[test]
@@ -1994,7 +2049,8 @@ mod tests {
     fn test_trusted_peers_score() {
         let trusted_peer = PeerId::random();
         let log = build_log(slog::Level::Debug, false);
-        let mut pdb: PeerDB = PeerDB::new(vec![trusted_peer], false, &log);
+        let chain_config = Arc::new(ChainConfig::mainnet());
+        let mut pdb: PeerDB = PeerDB::new(chain_config, vec![trusted_peer], false, &log);
 
         pdb.connect_ingoing(&trusted_peer, "/ip4/0.0.0.0".parse().unwrap(), None);
 
@@ -2018,7 +2074,8 @@ mod tests {
     fn test_disable_peer_scoring() {
         let peer = PeerId::random();
         let log = build_log(slog::Level::Debug, false);
-        let mut pdb: PeerDB = PeerDB::new(vec![], true, &log);
+        let chain_config = Arc::new(ChainConfig::mainnet());
+        let mut pdb: PeerDB = PeerDB::new(chain_config, vec![], true, &log);
 
         pdb.connect_ingoing(&peer, "/ip4/0.0.0.0".parse().unwrap(), None);
 

@@ -2,6 +2,8 @@
 
 use crate::common::time_cache::LRUTimeCache;
 use crate::discovery::enr_ext::EnrExt;
+use crate::discovery::peer_id_to_node_id;
+use crate::eip7594::{compute_custody_requirement_subnets, compute_custody_subnets};
 use crate::rpc::{GoodbyeReason, MetaData, Protocol, RPCError, RpcErrorResponse};
 use crate::{metrics, Gossipsub, NetworkGlobals, PeerId, Subnet, SubnetDiscovery};
 use anyhow::Result;
@@ -30,7 +32,7 @@ pub use peerdb::peer_info::{
 };
 use peerdb::score::{PeerAction, ReportSource};
 pub use peerdb::sync_status::{SyncInfo, SyncStatus};
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::net::IpAddr;
 use strum::IntoEnumIterator;
 
@@ -516,7 +518,10 @@ impl PeerManager {
                 RpcErrorResponse::Unknown => PeerAction::HighToleranceError,
                 RpcErrorResponse::ResourceUnavailable => {
                     // Don't ban on this because we want to retry with a block by root request.
-                    if matches!(protocol, Protocol::BlobsByRoot) {
+                    if matches!(
+                        protocol,
+                        Protocol::BlobsByRoot | Protocol::DataColumnsByRoot
+                    ) {
                         return;
                     }
 
@@ -555,7 +560,10 @@ impl PeerManager {
                     Protocol::LightClientBootstrap => return,
                     Protocol::LightClientOptimisticUpdate => return,
                     Protocol::LightClientFinalityUpdate => return,
+                    Protocol::LightClientUpdatesByRange => return,
                     Protocol::BlobsByRoot => PeerAction::MidToleranceError,
+                    Protocol::DataColumnsByRoot => PeerAction::MidToleranceError,
+                    Protocol::DataColumnsByRange => PeerAction::MidToleranceError,
                     Protocol::Goodbye => PeerAction::LowToleranceError,
                     Protocol::MetaData => PeerAction::LowToleranceError,
                     Protocol::Status => PeerAction::LowToleranceError,
@@ -575,10 +583,13 @@ impl PeerManager {
                     Protocol::BlocksByRoot => return,
                     Protocol::BlobsByRange => return,
                     Protocol::BlobsByRoot => return,
+                    Protocol::DataColumnsByRoot => return,
+                    Protocol::DataColumnsByRange => return,
                     Protocol::Goodbye => return,
                     Protocol::LightClientBootstrap => return,
                     Protocol::LightClientOptimisticUpdate => return,
                     Protocol::LightClientFinalityUpdate => return,
+                    Protocol::LightClientUpdatesByRange => return,
                     Protocol::MetaData => PeerAction::Fatal,
                     Protocol::Status => PeerAction::Fatal,
                 }
@@ -595,9 +606,12 @@ impl PeerManager {
                     Protocol::BlocksByRoot => PeerAction::MidToleranceError,
                     Protocol::BlobsByRange => PeerAction::MidToleranceError,
                     Protocol::BlobsByRoot => PeerAction::MidToleranceError,
+                    Protocol::DataColumnsByRoot => PeerAction::MidToleranceError,
+                    Protocol::DataColumnsByRange => PeerAction::MidToleranceError,
                     Protocol::LightClientBootstrap => return,
                     Protocol::LightClientOptimisticUpdate => return,
                     Protocol::LightClientFinalityUpdate => return,
+                    Protocol::LightClientUpdatesByRange => return,
                     Protocol::Goodbye => return,
                     Protocol::MetaData => return,
                     Protocol::Status => return,
@@ -679,6 +693,8 @@ impl PeerManager {
 
     /// Received a metadata response from a peer.
     pub fn meta_data_response(&mut self, peer_id: &PeerId, meta_data: MetaData) {
+        let mut invalid_meta_data = false;
+
         if let Some(peer_info) = self.network_globals.peers.write().peer_info_mut(peer_id) {
             if let Some(known_meta_data) = &peer_info.meta_data() {
                 if known_meta_data.seq_number() < meta_data.seq_number() {
@@ -695,10 +711,38 @@ impl PeerManager {
                 debug!(self.log, "Obtained peer's metadata";
                     "peer_id" => %peer_id, "new_seq_no" => meta_data.seq_number());
             }
+
+            let custody_subnet_count_opt = meta_data.custody_subnet_count();
             peer_info.set_meta_data(meta_data);
+
+            if self.network_globals.config.is_eip7594_fork_epoch_set() {
+                // Gracefully ignore metadata/v2 peers. Potentially downscore after PeerDAS to
+                // prioritize PeerDAS peers.
+                if let Some(custody_subnet_count) = custody_subnet_count_opt {
+                    match self.compute_peer_custody_subnets(peer_id, custody_subnet_count) {
+                        Ok(custody_subnets) => {
+                            peer_info.set_custody_subnets(custody_subnets);
+                        }
+                        Err(err) => {
+                            debug!(self.log, "Unable to compute peer custody subnets from metadata";
+                                "info" => "Sending goodbye to peer",
+                                "peer_id" => %peer_id,
+                                "custody_subnet_count" => custody_subnet_count,
+                                "error" => ?err,
+                            );
+                            invalid_meta_data = true;
+                        }
+                    };
+                }
+            }
         } else {
             error!(self.log, "Received METADATA from an unknown peer";
                 "peer_id" => %peer_id);
+        }
+
+        // Disconnect peers with invalid metadata and find other peers instead.
+        if invalid_meta_data {
+            self.goodbye_peer(peer_id, GoodbyeReason::Fault, ReportSource::PeerManager)
         }
     }
 
@@ -1265,6 +1309,7 @@ impl PeerManager {
         let mut peers_connected = 0;
         let mut clients_per_peer = HashMap::new();
         let mut peers_connected_mutli: HashMap<(&str, &str), i32> = HashMap::new();
+        let mut peers_per_custody_subnet_count: HashMap<u64, i64> = HashMap::new();
 
         for (_, peer_info) in self.network_globals.peers.read().connected_peers() {
             peers_connected += 1;
@@ -1295,10 +1340,25 @@ impl PeerManager {
             *peers_connected_mutli
                 .entry((direction, transport))
                 .or_default() += 1;
+
+            if let Some(MetaData::V3(meta_data)) = peer_info.meta_data() {
+                *peers_per_custody_subnet_count
+                    .entry(meta_data.custody_subnet_count)
+                    .or_default() += 1;
+            }
         }
 
         // PEERS_CONNECTED
         metrics::set_gauge(&metrics::PEERS_CONNECTED, peers_connected);
+
+        // CUSTODY_SUBNET_COUNT
+        for (custody_subnet_count, peer_count) in peers_per_custody_subnet_count.into_iter() {
+            metrics::set_gauge_vec(
+                &metrics::PEERS_PER_CUSTODY_SUBNET_COUNT,
+                &[&custody_subnet_count.to_string()],
+                peer_count,
+            )
+        }
 
         // PEERS_PER_CLIENT
         for client_kind in ClientKind::iter() {
@@ -1322,6 +1382,41 @@ impl PeerManager {
                 );
             }
         }
+    }
+
+    fn compute_peer_custody_subnets(
+        &self,
+        peer_id: &PeerId,
+        custody_subnet_count: u64,
+    ) -> Result<HashSet<SubnetId>, String> {
+        // If we don't have a node id, we cannot compute the custody duties anyway
+        let node_id = peer_id_to_node_id(peer_id)?;
+        let config = &self.network_globals.config;
+
+        if !(config.custody_requirement..=config.data_column_sidecar_subnet_count)
+            .contains(&custody_subnet_count)
+        {
+            return Err("Invalid custody subnet count in metadata: out of range".to_string());
+        }
+
+        let custody_subnets = compute_custody_subnets(node_id.raw(), custody_subnet_count)
+            .map(|subnets| subnets.collect())
+            .unwrap_or_else(|e| {
+                // This is an unreachable scenario unless there's a bug, as we've validated the csc
+                // just above.
+                error!(
+                    self.log,
+                    "Computing peer custody subnets failed unexpectedly";
+                    "info" => "Falling back to default custody requirement subnets",
+                    "peer_id" => %peer_id,
+                    "custody_subnet_count" => custody_subnet_count,
+                    "error" => ?e
+                );
+                compute_custody_requirement_subnets(node_id.raw(), &self.network_globals.config)
+                    .collect()
+            });
+
+        Ok(custody_subnets)
     }
 }
 

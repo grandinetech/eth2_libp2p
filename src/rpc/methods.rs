@@ -7,21 +7,27 @@ use regex::bytes::Regex;
 use serde::Serialize;
 use ssz::{ContiguousList, ReadError, Size, Ssz, SszRead, SszSize, SszWrite, WriteError};
 use std::marker::PhantomData;
-use std::{ops::Deref, sync::Arc};
+use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 use strum::IntoStaticStr;
 use try_from_iterator::TryFromIterator as _;
-use typenum::{Unsigned as _, U1024, U128, U256, U768};
+use typenum::{Prod, Unsigned as _, U1024, U128, U256};
 use types::deneb::containers::BlobIdentifier;
+use types::eip7594::NumberOfColumns;
+use types::preset::Mainnet;
 use types::{
     combined::{
         LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
-        SignedBeaconBlock,
+        LightClientUpdate, SignedBeaconBlock,
     },
+    config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
+    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar},
     phase0::primitives::{Epoch, ForkDigest, Slot, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
+
+const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u64 = 128;
 
 /// Maximum number of blocks in a single request.
 pub type MaxRequestBlocks = U1024;
@@ -34,8 +40,10 @@ pub const MAX_ERROR_LEN: u64 = 256;
 pub type MaxRequestBlocksDeneb = U128;
 pub const MAX_REQUEST_BLOCKS_DENEB: u64 = 128;
 
-pub type MaxRequestBlobSidecars = U768;
-pub const MAX_REQUEST_BLOB_SIDECARS: u64 = 768;
+pub type MaxRequestBlobSidecars =
+    Prod<MaxRequestBlocksDeneb, <Mainnet as Preset>::MaxBlobsPerBlock>;
+
+pub type MaxRequestDataColumnSidecars = Prod<MaxRequestBlocksDeneb, NumberOfColumns>;
 
 /// Wrapper over SSZ List to represent error message in rpc responses.
 #[derive(Debug, Clone)]
@@ -102,10 +110,12 @@ pub struct Ping {
     pub data: u64,
 }
 
+/// The METADATA request structure.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MetadataRequest<P: Preset> {
     V1(MetadataRequestV1<P>),
     V2(MetadataRequestV2<P>),
+    V3(MetadataRequestV3<P>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -115,6 +125,11 @@ pub struct MetadataRequestV1<P: Preset> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MetadataRequestV2<P: Preset> {
+    _phantom_data: PhantomData<P>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetadataRequestV3<P: Preset> {
     _phantom_data: PhantomData<P>,
 }
 
@@ -130,13 +145,19 @@ impl<P: Preset> MetadataRequest<P> {
             _phantom_data: PhantomData,
         })
     }
+
+    pub fn new_v3() -> Self {
+        Self::V3(MetadataRequestV3 {
+            _phantom_data: PhantomData,
+        })
+    }
 }
 
-/// The METADATA response structure.
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
 pub enum MetaData {
     V1(MetaDataV1),
     V2(MetaDataV2),
+    V3(MetaDataV3),
 }
 
 impl MetaData {
@@ -144,6 +165,7 @@ impl MetaData {
         match self {
             Self::V1(meta_data) => meta_data.seq_number,
             Self::V2(meta_data) => meta_data.seq_number,
+            Self::V3(meta_data) => meta_data.seq_number,
         }
     }
 
@@ -151,6 +173,7 @@ impl MetaData {
         match self {
             Self::V1(meta_data) => meta_data.attnets,
             Self::V2(meta_data) => meta_data.attnets,
+            Self::V3(meta_data) => meta_data.attnets,
         }
     }
 
@@ -158,6 +181,7 @@ impl MetaData {
         match self {
             Self::V1(_) => None,
             Self::V2(meta_data) => Some(meta_data.syncnets),
+            Self::V3(meta_data) => Some(meta_data.syncnets),
         }
     }
 
@@ -165,6 +189,7 @@ impl MetaData {
         match self {
             Self::V1(meta_data) => &mut meta_data.seq_number,
             Self::V2(meta_data) => &mut meta_data.seq_number,
+            Self::V3(meta_data) => &mut meta_data.seq_number,
         }
     }
 
@@ -172,6 +197,7 @@ impl MetaData {
         match self {
             Self::V1(meta_data) => &mut meta_data.attnets,
             Self::V2(meta_data) => &mut meta_data.attnets,
+            Self::V3(meta_data) => &mut meta_data.attnets,
         }
     }
 
@@ -179,6 +205,14 @@ impl MetaData {
         match self {
             Self::V1(_) => None,
             Self::V2(meta_data) => Some(&mut meta_data.syncnets),
+            Self::V3(meta_data) => Some(&mut meta_data.syncnets),
+        }
+    }
+
+    pub fn custody_subnet_count(&self) -> Option<u64> {
+        match self {
+            Self::V1(_) | Self::V2(_) => None,
+            Self::V3(meta_data) => Some(meta_data.custody_subnet_count),
         }
     }
 }
@@ -205,12 +239,29 @@ pub struct MetaDataV2 {
     pub syncnets: EnrSyncCommitteeBitfield,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+#[ssz(derive_hash = false)]
+pub struct MetaDataV3 {
+    /// A sequential counter indicating when data gets modified.
+    pub seq_number: u64,
+    /// The persistent attestation subnet bitfield.
+    pub attnets: EnrAttestationBitfield,
+    /// The persistent sync committee bitfield.
+    pub syncnets: EnrSyncCommitteeBitfield,
+    pub custody_subnet_count: u64,
+}
+
 impl MetaData {
     /// Returns a V1 MetaData response from self.
     pub fn metadata_v1(&self) -> Self {
         match self {
             md @ MetaData::V1(_) => md.clone(),
             MetaData::V2(metadata) => MetaData::V1(MetaDataV1 {
+                seq_number: metadata.seq_number,
+                attnets: metadata.attnets.clone(),
+            }),
+            MetaData::V3(metadata) => MetaData::V1(MetaDataV1 {
                 seq_number: metadata.seq_number,
                 attnets: metadata.attnets.clone(),
             }),
@@ -226,6 +277,30 @@ impl MetaData {
                 syncnets: Default::default(),
             }),
             md @ MetaData::V2(_) => md.clone(),
+            MetaData::V3(metadata) => MetaData::V2(MetaDataV2 {
+                seq_number: metadata.seq_number,
+                attnets: metadata.attnets.clone(),
+                syncnets: metadata.syncnets.clone(),
+            }),
+        }
+    }
+
+    /// Returns a V3 MetaData response from self by filling unavailable fields with default.
+    pub fn metadata_v3(&self, chain_config: &ChainConfig) -> Self {
+        match self {
+            MetaData::V1(metadata) => MetaData::V3(MetaDataV3 {
+                seq_number: metadata.seq_number,
+                attnets: metadata.attnets.clone(),
+                syncnets: Default::default(),
+                custody_subnet_count: chain_config.custody_requirement,
+            }),
+            MetaData::V2(metadata) => MetaData::V3(MetaDataV3 {
+                seq_number: metadata.seq_number,
+                attnets: metadata.attnets.clone(),
+                syncnets: metadata.syncnets.clone(),
+                custody_subnet_count: chain_config.custody_requirement,
+            }),
+            md @ MetaData::V3(_) => md.clone(),
         }
     }
 
@@ -233,6 +308,7 @@ impl MetaData {
         match self {
             MetaData::V1(md) => md.to_ssz(),
             MetaData::V2(md) => md.to_ssz(),
+            MetaData::V3(md) => md.to_ssz(),
         }
     }
 }
@@ -377,6 +453,44 @@ impl BlocksByRangeRequest {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Ssz)]
+/// Request a number of beacon data columns from a peer.
+pub struct DataColumnsByRangeRequest {
+    /// The starting slot to request data columns.
+    pub start_slot: u64,
+    /// The number of slots from the start slot.
+    pub count: u64,
+    /// The list column indices being requested.
+    pub columns: ContiguousList<ColumnIndex, NumberOfColumns>,
+}
+
+impl DataColumnsByRangeRequest {
+    pub fn max_requested<P: Preset>(&self) -> u64 {
+        self.count.saturating_mul(self.columns.len() as u64)
+    }
+
+    pub fn ssz_min_len() -> Result<usize> {
+        Ok(DataColumnsByRangeRequest {
+            start_slot: 0,
+            count: 0,
+            columns: ContiguousList::try_from(vec![0])?,
+        }
+        .to_ssz()?
+        .len())
+    }
+
+    pub fn ssz_max_len() -> Result<usize> {
+        Ok(DataColumnsByRangeRequest {
+            start_slot: 0,
+            count: 0,
+            columns: ContiguousList::try_from(vec![0; NumberOfColumns::USIZE])?,
+        }
+        .to_ssz()?
+        .len())
+    }
+}
+
+/// Request a number of beacon block roots from a peer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OldBlocksByRangeRequest {
     V1(OldBlocksByRangeRequestV1),
@@ -512,6 +626,47 @@ impl BlobsByRootRequest {
     }
 }
 
+/// Request a number of data columns from a peer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DataColumnsByRootRequest {
+    /// The list of beacon block roots and column indices being requested.
+    pub data_column_ids: ContiguousList<DataColumnIdentifier, MaxRequestDataColumnSidecars>,
+}
+
+impl DataColumnsByRootRequest {
+    pub fn new(
+        data_column_ids: ContiguousList<DataColumnIdentifier, MaxRequestDataColumnSidecars>,
+    ) -> Self {
+        Self { data_column_ids }
+    }
+
+    pub fn group_by_ordered_block_root(&self) -> Vec<(H256, Vec<ColumnIndex>)> {
+        let mut column_indexes_by_block = BTreeMap::<H256, Vec<ColumnIndex>>::new();
+        for request_id in self.data_column_ids.as_ref() {
+            column_indexes_by_block
+                .entry(request_id.block_root)
+                .or_default()
+                .push(request_id.index);
+        }
+        column_indexes_by_block.into_iter().collect()
+    }
+}
+
+/// Request a number of beacon data columns from a peer.
+#[derive(Clone, Debug, PartialEq, Ssz)]
+pub struct LightClientUpdatesByRangeRequest {
+    /// The starting period to request light client updates.
+    pub start_period: u64,
+    /// The number of periods from `start_period`.
+    pub count: u64,
+}
+
+impl LightClientUpdatesByRangeRequest {
+    pub fn max_requested(&self) -> u64 {
+        MAX_REQUEST_LIGHT_CLIENT_UPDATES
+    }
+}
+
 /* RPC Handling and Grouping */
 // Collection of enums and structs used by the Codecs to encode/decode RPC messages
 
@@ -539,8 +694,17 @@ pub enum RpcSuccessResponse<P: Preset> {
     /// A response to a get LIGHT_CLIENT_FINALITY_UPDATE request.
     LightClientFinalityUpdate(Arc<LightClientFinalityUpdate<P>>),
 
+    /// A response to a get LIGHT_CLIENT_UPDATES_BY_RANGE request.
+    LightClientUpdatesByRange(Arc<LightClientUpdate<P>>),
+
     /// A response to a get BLOBS_BY_ROOT request.
     BlobsByRoot(Arc<BlobSidecar<P>>),
+
+    /// A response to a get DATA_COLUMN_SIDECARS_BY_ROOT request.
+    DataColumnsByRoot(Arc<DataColumnSidecar<P>>),
+
+    /// A response to a get DATA_COLUMN_SIDECARS_BY_RANGE request.
+    DataColumnsByRange(Arc<DataColumnSidecar<P>>),
 
     /// A PONG response to a PING request.
     Pong(Ping),
@@ -563,6 +727,15 @@ pub enum ResponseTermination {
 
     /// Blobs by root stream termination.
     BlobsByRoot,
+
+    /// Data column sidecars by root stream termination.
+    DataColumnsByRoot,
+
+    /// Data column sidecars by range stream termination.
+    DataColumnsByRange,
+
+    /// Light client updates by range stream termination.
+    LightClientUpdatesByRange,
 }
 
 /// The structured response containing a result/code indicating success or failure
@@ -653,6 +826,8 @@ impl<P: Preset> RpcSuccessResponse<P> {
             RpcSuccessResponse::BlocksByRoot(_) => Protocol::BlocksByRoot,
             RpcSuccessResponse::BlobsByRange(_) => Protocol::BlobsByRange,
             RpcSuccessResponse::BlobsByRoot(_) => Protocol::BlobsByRoot,
+            RpcSuccessResponse::DataColumnsByRoot(_) => Protocol::DataColumnsByRoot,
+            RpcSuccessResponse::DataColumnsByRange(_) => Protocol::DataColumnsByRange,
             RpcSuccessResponse::Pong(_) => Protocol::Ping,
             RpcSuccessResponse::MetaData(_) => Protocol::MetaData,
             RpcSuccessResponse::LightClientBootstrap(_) => Protocol::LightClientBootstrap,
@@ -660,6 +835,7 @@ impl<P: Preset> RpcSuccessResponse<P> {
                 Protocol::LightClientOptimisticUpdate
             }
             RpcSuccessResponse::LightClientFinalityUpdate(_) => Protocol::LightClientFinalityUpdate,
+            RpcSuccessResponse::LightClientUpdatesByRange(_) => Protocol::LightClientUpdatesByRange,
         }
     }
 }
@@ -700,6 +876,16 @@ impl<P: Preset> std::fmt::Display for RpcSuccessResponse<P> {
             RpcSuccessResponse::BlobsByRoot(sidecar) => {
                 write!(f, "BlobsByRoot: Blob slot: {}", sidecar.slot())
             }
+            RpcSuccessResponse::DataColumnsByRoot(sidecar) => {
+                write!(f, "DataColumnsByRoot: Data column slot: {}", sidecar.slot())
+            }
+            RpcSuccessResponse::DataColumnsByRange(sidecar) => {
+                write!(
+                    f,
+                    "DataColumnsByRange: Data column slot: {}",
+                    sidecar.slot()
+                )
+            }
             RpcSuccessResponse::Pong(ping) => write!(f, "Pong: {}", ping.data),
             RpcSuccessResponse::MetaData(metadata) => {
                 write!(f, "Metadata: {}", metadata.seq_number())
@@ -719,6 +905,13 @@ impl<P: Preset> std::fmt::Display for RpcSuccessResponse<P> {
                     f,
                     "LightClientFinalityUpdate Slot: {}",
                     update.signature_slot()
+                )
+            }
+            RpcSuccessResponse::LightClientUpdatesByRange(update) => {
+                write!(
+                    f,
+                    "LightClientUpdatesByRange Slot: {}",
+                    update.signature_slot(),
                 )
             }
         }
@@ -790,6 +983,16 @@ impl std::fmt::Display for BlobsByRangeRequest {
             f,
             "Request: BlobsByRange: Start Slot: {}, Count: {}",
             self.start_slot, self.count
+        )
+    }
+}
+
+impl std::fmt::Display for DataColumnsByRootRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Request: DataColumnsByRoot: Number of Requested Data Column Ids: {}",
+            self.data_column_ids.len()
         )
     }
 }

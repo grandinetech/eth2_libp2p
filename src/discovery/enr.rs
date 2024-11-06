@@ -37,7 +37,7 @@ pub trait Eth2Enr {
     fn sync_committee_bitfield(&self) -> Result<EnrSyncCommitteeBitfield, &'static str>;
 
     /// The peerdas custody subnet count associated with the ENR.
-    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> u64;
+    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> Result<u64, &'static str>;
 
     fn eth2(&self) -> Result<EnrForkId, &'static str>;
 }
@@ -65,12 +65,19 @@ impl Eth2Enr for Enr {
 
     /// if the custody value is non-existent in the ENR, then we assume the minimum custody value
     /// defined in the spec.
-    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> u64 {
-        self.get_decodable::<u64>(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY)
-            .and_then(|r| r.ok())
-            // If value supplied in ENR is invalid, fallback to `custody_requirement`
-            .filter(|csc| csc <= &chain_config.data_column_sidecar_subnet_count)
-            .unwrap_or(chain_config.custody_requirement)
+    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> Result<u64, &'static str> {
+        let csc = self
+            .get_decodable::<u64>(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY)
+            .ok_or("ENR custody subnet count non-existent")?
+            .map_err(|_| "Could not decode the ENR custody subnet count")?;
+
+        if csc >= chain_config.custody_requirement
+            && csc <= chain_config.data_column_sidecar_subnet_count
+        {
+            Ok(csc)
+        } else {
+            Err("Invalid custody subnet count in ENR")
+        }
     }
 
     fn eth2(&self) -> Result<EnrForkId, &'static str> {
@@ -357,7 +364,7 @@ mod test {
         let enr = build_enr_with_config(&chain_config, config).0;
 
         assert_eq!(
-            enr.custody_subnet_count(&chain_config),
+            enr.custody_subnet_count(&chain_config).unwrap(),
             chain_config.custody_requirement,
         );
     }
@@ -372,28 +379,8 @@ mod test {
         let enr = build_enr_with_config(&chain_config, config).0;
 
         assert_eq!(
-            enr.custody_subnet_count(&chain_config),
+            enr.custody_subnet_count(&chain_config).unwrap(),
             chain_config.data_column_sidecar_subnet_count,
-        );
-    }
-
-    #[test]
-    fn custody_subnet_count_fallback_default() {
-        let config = NetworkConfig::default();
-        let chain_config = make_eip7594_config();
-        let (mut enr, enr_key) = build_enr_with_config(&chain_config, config);
-        let invalid_subnet_count = 99u64;
-
-        enr.insert(
-            PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY,
-            &invalid_subnet_count,
-            &enr_key,
-        )
-        .unwrap();
-
-        assert_eq!(
-            enr.custody_subnet_count(&chain_config),
-            chain_config.custody_requirement,
         );
     }
 

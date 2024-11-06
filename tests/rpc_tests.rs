@@ -84,7 +84,7 @@ fn bellatrix_block_large<P: Preset>(fork_context: &ForkContext) -> BellatrixSign
 // Tests the STATUS RPC message
 #[tokio::test]
 #[allow(clippy::single_match)]
-async fn test_status_rpc() {
+async fn test_tcp_status_rpc() {
     // set up the logging. The level and enabled logging or not
     let log_level = Level::Debug;
     let enable_logging = false;
@@ -177,7 +177,7 @@ async fn test_status_rpc() {
 // Tests a streamed BlocksByRange RPC Message
 #[tokio::test]
 #[allow(clippy::single_match)]
-async fn test_blocks_by_range_chunked_rpc() {
+async fn test_tcp_blocks_by_range_chunked_rpc() {
     // set up the logging. The level and enabled logging or not
     let log_level = Level::Debug;
     let enable_logging = false;
@@ -427,7 +427,7 @@ async fn test_blobs_by_range_chunked_rpc() {
 // Tests rejection of blocks over `MAX_RPC_SIZE`.
 #[tokio::test]
 #[allow(clippy::single_match)]
-async fn test_blocks_by_range_over_limit() {
+async fn test_tcp_blocks_by_range_over_limit() {
     // set up the logging. The level and enabled logging or not
     let log_level = Level::Debug;
     let enable_logging = false;
@@ -523,7 +523,7 @@ async fn test_blocks_by_range_over_limit() {
 
 // Tests that a streamed BlocksByRange RPC Message terminates when all expected chunks were received
 #[tokio::test]
-async fn blocks_by_range_chunked_rpc_terminates_correctly() {
+async fn test_tcp_blocks_by_range_chunked_rpc_terminates_correctly() {
     // set up the logging. The level and enabled logging or not
     let log_level = Level::Debug;
     let enable_logging = false;
@@ -653,7 +653,7 @@ async fn blocks_by_range_chunked_rpc_terminates_correctly() {
 // Tests an empty response to a BlocksByRange RPC Message
 #[tokio::test]
 #[allow(clippy::single_match)]
-async fn test_blocks_by_range_single_empty_rpc() {
+async fn test_tcp_blocks_by_range_single_empty_rpc() {
     // set up the logging. The level and enabled logging or not
     let log_level = Level::Trace;
     let enable_logging = false;
@@ -763,7 +763,7 @@ async fn test_blocks_by_range_single_empty_rpc() {
 // serves to test the snappy framing format as well.
 #[tokio::test]
 #[allow(clippy::single_match)]
-async fn test_blocks_by_root_chunked_rpc() {
+async fn test_tcp_blocks_by_root_chunked_rpc() {
     // set up the logging. The level and enabled logging or not
     let log_level = Level::Debug;
     let enable_logging = false;
@@ -895,7 +895,7 @@ async fn test_blocks_by_root_chunked_rpc() {
 
 // Tests a streamed, chunked BlocksByRoot RPC Message terminates when all expected reponses have been received
 #[tokio::test]
-async fn test_blocks_by_root_chunked_rpc_terminates_correctly() {
+async fn test_tcp_blocks_by_root_chunked_rpc_terminates_correctly() {
     // set up the logging. The level and enabled logging or not
     let log_level = Level::Debug;
     let enable_logging = false;

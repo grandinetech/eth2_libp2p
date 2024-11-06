@@ -4,9 +4,10 @@ use libp2p::swarm::ConnectionId;
 use types::{
     combined::{
         LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
-        SignedBeaconBlock,
+        LightClientUpdate, SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
+    eip7594::DataColumnSidecar,
     preset::Preset,
 };
 
@@ -39,16 +40,22 @@ pub enum Response<P: Preset> {
     BlocksByRange(Option<Arc<SignedBeaconBlock<P>>>),
     /// A response to a get BLOBS_BY_RANGE request. A None response signals the end of the batch.
     BlobsByRange(Option<Arc<BlobSidecar<P>>>),
+    /// A response to a get DATA_COLUMN_SIDECARS_BY_Range request.
+    DataColumnsByRange(Option<Arc<DataColumnSidecar<P>>>),
     /// A response to a get BLOCKS_BY_ROOT request.
     BlocksByRoot(Option<Arc<SignedBeaconBlock<P>>>),
     /// A response to a get BLOBS_BY_ROOT request.
     BlobsByRoot(Option<Arc<BlobSidecar<P>>>),
+    /// A response to a get DATA_COLUMN_SIDECARS_BY_ROOT request.
+    DataColumnsByRoot(Option<Arc<DataColumnSidecar<P>>>),
     /// A response to a LightClientUpdate request.
     LightClientBootstrap(Arc<LightClientBootstrap<P>>),
     /// A response to a LightClientOptimisticUpdate request.
     LightClientOptimisticUpdate(Arc<LightClientOptimisticUpdate<P>>),
     /// A response to a LightClientFinalityUpdate request.
     LightClientFinalityUpdate(Arc<LightClientFinalityUpdate<P>>),
+    /// A response to a LightClientUpdatesByRange request.
+    LightClientUpdatesByRange(Option<Arc<LightClientUpdate<P>>>),
 }
 
 impl<P: Preset> std::convert::From<Response<P>> for RpcResponse<P> {
@@ -70,6 +77,14 @@ impl<P: Preset> std::convert::From<Response<P>> for RpcResponse<P> {
                 Some(b) => RpcResponse::Success(RpcSuccessResponse::BlobsByRange(b)),
                 None => RpcResponse::StreamTermination(ResponseTermination::BlobsByRange),
             },
+            Response::DataColumnsByRoot(r) => match r {
+                Some(d) => RpcResponse::Success(RpcSuccessResponse::DataColumnsByRoot(d)),
+                None => RpcResponse::StreamTermination(ResponseTermination::DataColumnsByRoot),
+            },
+            Response::DataColumnsByRange(r) => match r {
+                Some(d) => RpcResponse::Success(RpcSuccessResponse::DataColumnsByRange(d)),
+                None => RpcResponse::StreamTermination(ResponseTermination::DataColumnsByRange),
+            },
             Response::Status(s) => RpcResponse::Success(RpcSuccessResponse::Status(s)),
             Response::LightClientBootstrap(b) => {
                 RpcResponse::Success(RpcSuccessResponse::LightClientBootstrap(b))
@@ -80,6 +95,12 @@ impl<P: Preset> std::convert::From<Response<P>> for RpcResponse<P> {
             Response::LightClientFinalityUpdate(f) => {
                 RpcResponse::Success(RpcSuccessResponse::LightClientFinalityUpdate(f))
             }
+            Response::LightClientUpdatesByRange(f) => match f {
+                Some(d) => RpcResponse::Success(RpcSuccessResponse::LightClientUpdatesByRange(d)),
+                None => {
+                    RpcResponse::StreamTermination(ResponseTermination::LightClientUpdatesByRange)
+                }
+            },
         }
     }
 }

@@ -919,7 +919,7 @@ impl std::fmt::Debug for Config {
             &self.published_message_ids_cache_time,
         );
         let _ = builder.field(
-            "idontwant_message_size_threhold",
+            "idontwant_message_size_threshold",
             &self.idontwant_message_size_threshold,
         );
         builder.finish()

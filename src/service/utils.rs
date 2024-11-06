@@ -1,6 +1,5 @@
 use crate::multiaddr::Protocol;
-use crate::rpc::methods::MetaDataV1;
-use crate::rpc::{MetaData, MetaDataV2};
+use crate::rpc::{MetaData, MetaDataV1, MetaDataV2, MetaDataV3};
 use crate::types::{
     EnrAttestationBitfield, EnrForkId, EnrSyncCommitteeBitfield, ForkContext, GossipEncoding,
     GossipKind,
@@ -14,7 +13,7 @@ use libp2p::identity::{secp256k1, Keypair};
 use libp2p::{core, noise, yamux, PeerId, Transport};
 use prometheus_client::registry::Registry;
 use slog::{debug, warn};
-use ssz::{SszReadDefault as _, SszWrite as _};
+use ssz::SszReadDefault as _;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::prelude::*;
@@ -180,7 +179,11 @@ pub fn strip_peer_id(addr: &mut Multiaddr) {
 }
 
 /// Load metadata from persisted file. Return default metadata if loading fails.
-pub fn load_or_build_metadata(network_dir: Option<&Path>, log: &slog::Logger) -> MetaData {
+pub fn load_or_build_metadata(
+    network_dir: Option<&Path>,
+    custody_subnet_count: Option<u64>,
+    log: &slog::Logger,
+) -> MetaData {
     // We load a V2 metadata version by default (regardless of current fork)
     // since a V2 metadata can be converted to V1. The RPC encoder is responsible
     // for sending the correct metadata version based on the negotiated protocol version.
@@ -232,7 +235,16 @@ pub fn load_or_build_metadata(network_dir: Option<&Path>, log: &slog::Logger) ->
     }
 
     // Wrap the MetaData
-    let meta_data = MetaData::V2(meta_data);
+    let meta_data = if let Some(custody_count) = custody_subnet_count {
+        MetaData::V3(MetaDataV3 {
+            attnets: meta_data.attnets,
+            seq_number: meta_data.seq_number,
+            syncnets: meta_data.syncnets,
+            custody_subnet_count: custody_count,
+        })
+    } else {
+        MetaData::V2(meta_data)
+    };
 
     debug!(log, "Metadata sequence number"; "seq_num" => meta_data.seq_number());
     save_metadata_to_disk(network_dir, meta_data.clone(), log);
@@ -246,6 +258,7 @@ pub(crate) fn create_whitelist_filter(
     attestation_subnet_count: u64,
     sync_committee_subnet_count: u64,
     blob_sidecar_subnet_count: u64,
+    data_column_sidecar_subnet_count: u64,
 ) -> gossipsub::WhitelistSubscriptionFilter {
     let mut possible_hashes = HashSet::new();
     for fork_digest in possible_fork_digests {
@@ -274,6 +287,9 @@ pub(crate) fn create_whitelist_filter(
         for id in 0..blob_sidecar_subnet_count {
             add(BlobSidecar(id));
         }
+        for id in 0..data_column_sidecar_subnet_count {
+            add(DataColumnSidecar(id));
+        }
     }
     gossipsub::WhitelistSubscriptionFilter(possible_hashes)
 }
@@ -286,10 +302,11 @@ pub(crate) fn save_metadata_to_disk(dir: Option<&Path>, metadata: MetaData, log:
     };
 
     let write_to_disk = || -> Result<()> {
-        let ssz_bytes = match metadata {
-            MetaData::V1(meta_data) => meta_data.to_ssz()?,
-            MetaData::V2(meta_data) => meta_data.to_ssz()?,
-        };
+        // We always store the metadata v2 to disk because
+        // custody_subnet_count parameter doesn't need to be persisted across runs.
+        // custody_subnet_count is what the user sets it for the current run.
+        // This is to prevent ugly branching logic when reading the metadata from disk.
+        let ssz_bytes = metadata.metadata_v2().to_ssz()?;
 
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join(METADATA_FILENAME), ssz_bytes)?;

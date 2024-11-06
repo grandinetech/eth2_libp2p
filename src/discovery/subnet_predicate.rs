@@ -21,24 +21,26 @@ pub fn subnet_predicate(
 
         // Pre-fork/fork-boundary enrs may not contain a syncnets field.
         // Don't return early here.
-        let sync_committee_bitfield = enr.sync_committee_bitfield().ok();
+        let sync_committee_bitfield = enr.sync_committee_bitfield();
 
-        // TODO(das): compute from enr
-        let custody_subnet_count = chain_config.custody_requirement;
-
-        let predicate = subnets.iter().copied().any(|subnet| match subnet {
+        let predicate = subnets.iter().any(|subnet| match subnet {
             Subnet::Attestation(subnet_id) => attestation_bitfield
-                .get(subnet_id as usize)
+                .get(*subnet_id as usize)
                 .unwrap_or_default(),
-            Subnet::SyncCommittee(subnet_id) => sync_committee_bitfield
-                .and_then(|bitfield| bitfield.get(subnet_id as usize))
-                .unwrap_or_default(),
-            Subnet::DataColumn(s) => {
-                let subnets = get_custody_columns(
-                    Uint256::from_be_bytes(enr.node_id().raw()),
-                    custody_subnet_count,
-                );
-                subnets.contains(&s)
+            Subnet::SyncCommittee(subnet_id) => sync_committee_bitfield.map_or(false, |bitfield| {
+                bitfield.get(*subnet_id as usize).unwrap_or_default()
+            }),
+            Subnet::DataColumn(subnet_id) => {
+                if let Ok(custody_subnet_count) = enr.custody_subnet_count(&chain_config) {
+                    let subnets = get_custody_columns(
+                        Uint256::from_be_bytes(enr.node_id().raw()),
+                        custody_subnet_count,
+                    );
+
+                    subnets.contains(subnet_id)
+                } else {
+                    false
+                }
             }
         });
 

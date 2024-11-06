@@ -25,7 +25,7 @@ futures = "0.3.30"
 futures-ticker = "0.0.3"
 futures-timer = "3.0.2"
 getrandom = "0.2.12"
-hashlink = "0.9.1"
+hashlink = { workspace = true }
 hex_fmt = "0.3.0"
 libp2p = { version = "0.54", default-features = false }
 quick-protobuf = "0.8"
