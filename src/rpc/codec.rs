@@ -1539,9 +1539,29 @@ mod tests {
         assert_eq!(
             encode_then_decode_response::<Mainnet>(
                 &config,
+                SupportedProtocol::BlobsByRangeV1,
+                RpcResponse::Success(RpcSuccessResponse::BlobsByRange(empty_blob_sidecar())),
+                Phase::Electra,
+            ),
+            Ok(Some(RpcSuccessResponse::BlobsByRange(empty_blob_sidecar()))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
                 SupportedProtocol::BlobsByRootV1,
                 RpcResponse::Success(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar())),
                 Phase::Deneb,
+            ),
+            Ok(Some(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar()))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::BlobsByRootV1,
+                RpcResponse::Success(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar())),
+                Phase::Electra,
             ),
             Ok(Some(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar()))),
         );
@@ -1563,11 +1583,39 @@ mod tests {
         assert_eq!(
             encode_then_decode_response::<Mainnet>(
                 &config,
+                SupportedProtocol::DataColumnsByRangeV1,
+                RpcResponse::Success(RpcSuccessResponse::DataColumnsByRange(
+                    empty_data_column_sidecar()
+                )),
+                Phase::Electra,
+            ),
+            Ok(Some(RpcSuccessResponse::DataColumnsByRange(
+                empty_data_column_sidecar()
+            ))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
                 SupportedProtocol::DataColumnsByRootV1,
                 RpcResponse::Success(RpcSuccessResponse::DataColumnsByRoot(
                     empty_data_column_sidecar()
                 )),
                 Phase::Deneb,
+            ),
+            Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
+                empty_data_column_sidecar()
+            ))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::DataColumnsByRootV1,
+                RpcResponse::Success(RpcSuccessResponse::DataColumnsByRoot(
+                    empty_data_column_sidecar()
+                )),
+                Phase::Electra,
             ),
             Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
                 empty_data_column_sidecar()
