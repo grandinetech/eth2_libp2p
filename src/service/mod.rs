@@ -310,7 +310,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
 
             let max_topics = AttestationSubnetCount::USIZE
                 + SyncCommitteeSubnetCount::USIZE
-                + chain_config.blob_sidecar_subnet_count as usize
+                + chain_config.blob_sidecar_subnet_count.get() as usize
                 + chain_config.data_column_sidecar_subnet_count as usize
                 + BASE_CORE_TOPICS.len()
                 + ALTAIR_CORE_TOPICS.len()
@@ -323,7 +323,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     possible_fork_digests,
                     AttestationSubnetCount::U64,
                     SyncCommitteeSubnetCount::U64,
-                    chain_config.blob_sidecar_subnet_count,
+                    chain_config.blob_sidecar_subnet_count.get(),
                     chain_config.data_column_sidecar_subnet_count,
                 ),
                 // during a fork we subscribe to both the old and new topics
