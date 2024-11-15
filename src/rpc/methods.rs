@@ -31,14 +31,10 @@ const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u64 = 128;
 
 /// Maximum number of blocks in a single request.
 pub type MaxRequestBlocks = U1024;
-pub const MAX_REQUEST_BLOCKS: u64 = 1024;
 
 /// Maximum length of error message.
 pub type MaxErrorLen = U256;
-pub const MAX_ERROR_LEN: u64 = 256;
-
 pub type MaxRequestBlocksDeneb = U128;
-pub const MAX_REQUEST_BLOCKS_DENEB: u64 = 128;
 
 pub type MaxRequestBlobSidecars =
     Prod<MaxRequestBlocksDeneb, <Mainnet as Preset>::MaxBlobsPerBlock>;
