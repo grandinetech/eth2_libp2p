@@ -8,7 +8,7 @@ use libp2p::bytes::BufMut;
 use libp2p::bytes::BytesMut;
 use snap::read::FrameDecoder;
 use snap::write::FrameEncoder;
-use ssz::{ContiguousList, SszReadDefault, SszWrite as _, H256};
+use ssz::{ContiguousList, DynamicList, SszRead as _, SszReadDefault, SszWrite as _, H256};
 use std::io::Cursor;
 use std::io::ErrorKind;
 use std::io::{Read, Write};
@@ -23,6 +23,7 @@ use types::{
         LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
         LightClientUpdate, SignedBeaconBlock,
     },
+    config::Config as ChainConfig,
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebSignedBeaconBlock},
     eip7594::DataColumnSidecar,
     electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
@@ -38,6 +39,7 @@ const CONTEXT_BYTES_LEN: usize = 4;
 /* Inbound Codec */
 
 pub struct SSZSnappyInboundCodec<P: Preset> {
+    chain_config: Arc<ChainConfig>,
     protocol: ProtocolId,
     inner: Uvi<usize>,
     len: Option<usize>,
@@ -49,6 +51,7 @@ pub struct SSZSnappyInboundCodec<P: Preset> {
 
 impl<P: Preset> SSZSnappyInboundCodec<P> {
     pub fn new(
+        chain_config: Arc<ChainConfig>,
         protocol: ProtocolId,
         max_packet_size: usize,
         fork_context: Arc<ForkContext>,
@@ -58,6 +61,7 @@ impl<P: Preset> SSZSnappyInboundCodec<P> {
         debug_assert_eq!(protocol.encoding, Encoding::SSZSnappy);
 
         SSZSnappyInboundCodec {
+            chain_config,
             inner: uvi_codec,
             protocol,
             len: None,
@@ -172,7 +176,7 @@ impl<P: Preset> Decoder for SSZSnappyInboundCodec<P> {
 
         // Should not attempt to decode rpc chunks with `length > max_packet_size` or not within bounds of
         // packet size for ssz container corresponding to `self.protocol`.
-        let ssz_limits = self.protocol.rpc_request_limits();
+        let ssz_limits = self.protocol.rpc_request_limits(&self.chain_config);
         if ssz_limits.is_out_of_bounds(length, self.max_packet_size) {
             return Err(RPCError::InvalidData(format!(
                 "RPC request length for protocol {:?} is out of bounds, length {}",
@@ -193,7 +197,11 @@ impl<P: Preset> Decoder for SSZSnappyInboundCodec<P> {
                 let n = reader.get_ref().get_ref().position();
                 self.len = None;
                 let _read_bytes = src.split_to(n as usize);
-                handle_rpc_request(self.protocol.versioned_protocol, &decoded_buffer)
+                handle_rpc_request(
+                    &self.chain_config,
+                    self.protocol.versioned_protocol,
+                    &decoded_buffer,
+                )
             }
             Err(e) => handle_error(e, reader.get_ref().get_ref().position(), max_compressed_len),
         }
@@ -605,6 +613,7 @@ fn handle_length(
 /// `decoded_buffer` should be an ssz-encoded bytestream with
 // length = length-prefix received in the beginning of the stream.
 fn handle_rpc_request<P: Preset>(
+    config: &ChainConfig,
     versioned_protocol: SupportedProtocol,
     decoded_buffer: &[u8],
 ) -> Result<Option<RequestType<P>>, RPCError> {
@@ -627,12 +636,18 @@ fn handle_rpc_request<P: Preset>(
         ))),
         SupportedProtocol::BlocksByRootV2 => Ok(Some(RequestType::BlocksByRoot(
             BlocksByRootRequest::V2(BlocksByRootRequestV2 {
-                block_roots: ContiguousList::from_ssz_default(decoded_buffer)?,
+                block_roots: DynamicList::from_ssz(
+                    &(config.max_request_blocks(Phase::Phase0) as usize),
+                    decoded_buffer,
+                )?,
             }),
         ))),
         SupportedProtocol::BlocksByRootV1 => Ok(Some(RequestType::BlocksByRoot(
             BlocksByRootRequest::V1(BlocksByRootRequestV1 {
-                block_roots: ContiguousList::from_ssz_default(decoded_buffer)?,
+                block_roots: DynamicList::from_ssz(
+                    &(config.max_request_blocks(Phase::Phase0) as usize),
+                    decoded_buffer,
+                )?,
             }),
         ))),
         SupportedProtocol::BlobsByRangeV1 => Ok(Some(RequestType::BlobsByRange(
@@ -640,7 +655,10 @@ fn handle_rpc_request<P: Preset>(
         ))),
         SupportedProtocol::BlobsByRootV1 => {
             Ok(Some(RequestType::BlobsByRoot(BlobsByRootRequest {
-                blob_ids: ContiguousList::from_ssz_default(decoded_buffer)?,
+                blob_ids: DynamicList::from_ssz(
+                    &(config.max_request_blob_sidecars as usize),
+                    decoded_buffer,
+                )?,
             })))
         }
         SupportedProtocol::DataColumnsByRangeV1 => Ok(Some(RequestType::DataColumnsByRange(
@@ -648,7 +666,10 @@ fn handle_rpc_request<P: Preset>(
         ))),
         SupportedProtocol::DataColumnsByRootV1 => Ok(Some(RequestType::DataColumnsByRoot(
             DataColumnsByRootRequest {
-                data_column_ids: ContiguousList::from_ssz_default(decoded_buffer)?,
+                data_column_ids: DynamicList::from_ssz(
+                    &(config.max_request_data_column_sidecars as usize),
+                    decoded_buffer,
+                )?,
             },
         ))),
         SupportedProtocol::PingV1 => Ok(Some(RequestType::Ping(Ping {
@@ -1067,9 +1088,10 @@ mod tests {
     };
     use anyhow::Result;
     use snap::write::FrameEncoder;
-    use ssz::ByteList;
+    use ssz::{ByteList, DynamicList};
     use std::io::Write;
     use std::sync::Arc;
+    use std_ext::ArcExt as _;
     use try_from_iterator::TryFromIterator as _;
     use types::{
         bellatrix::containers::{
@@ -1186,11 +1208,10 @@ mod tests {
 
     fn dcbroot_request() -> DataColumnsByRootRequest {
         DataColumnsByRootRequest {
-            data_column_ids: ContiguousList::try_from(vec![DataColumnIdentifier {
+            data_column_ids: DynamicList::single(DataColumnIdentifier {
                 block_root: H256::zero(),
                 index: 0,
-            }])
-            .expect("DataColumnIds list can be created from single identifier"),
+            }),
         }
     }
 
@@ -1209,21 +1230,20 @@ mod tests {
         }
     }
 
-    fn bbroot_request_v1() -> BlocksByRootRequest {
-        BlocksByRootRequest::new_v1(ContiguousList::full(H256::zero()))
+    fn bbroot_request_v1(config: &Config, phase: Phase) -> BlocksByRootRequest {
+        BlocksByRootRequest::new_v1(config, phase, core::iter::once(H256::zero()))
     }
 
-    fn bbroot_request_v2() -> BlocksByRootRequest {
-        BlocksByRootRequest::new(ContiguousList::full(H256::zero()))
+    fn bbroot_request_v2(config: &Config, phase: Phase) -> BlocksByRootRequest {
+        BlocksByRootRequest::new(config, phase, core::iter::once(H256::zero()))
     }
 
     fn blbroot_request() -> BlobsByRootRequest {
         BlobsByRootRequest {
-            blob_ids: ContiguousList::try_from(vec![BlobIdentifier {
+            blob_ids: DynamicList::single(BlobIdentifier {
                 block_root: H256::zero(),
                 index: 0,
-            }])
-            .expect("BlobIds list can be created from single identifier"),
+            }),
         }
     }
 
@@ -1267,8 +1287,12 @@ mod tests {
         let max_packet_size = max_rpc_size(&fork_context, config.max_chunk_size);
 
         let mut buf = BytesMut::new();
-        let mut snappy_inbound_codec =
-            SSZSnappyInboundCodec::<P>::new(snappy_protocol_id, max_packet_size, fork_context);
+        let mut snappy_inbound_codec = SSZSnappyInboundCodec::<P>::new(
+            config.clone_arc(),
+            snappy_protocol_id,
+            max_packet_size,
+            fork_context,
+        );
 
         snappy_inbound_codec.encode_response(message, &mut buf)?;
         Ok(buf)
@@ -1350,6 +1374,7 @@ mod tests {
         outbound_codec.encode(req.clone(), &mut buf).unwrap();
 
         let mut inbound_codec = SSZSnappyInboundCodec::<P>::new(
+            config.clone_arc(),
             protocol.clone(),
             max_packet_size,
             fork_context.clone(),
@@ -2018,8 +2043,8 @@ mod tests {
             RequestType::Goodbye(GoodbyeReason::Fault),
             RequestType::BlocksByRange(bbrange_request_v1()),
             RequestType::BlocksByRange(bbrange_request_v2()),
-            RequestType::BlocksByRoot(bbroot_request_v1()),
-            RequestType::BlocksByRoot(bbroot_request_v2()),
+            RequestType::BlocksByRoot(bbroot_request_v1(&config, Phase::Phase0)),
+            RequestType::BlocksByRoot(bbroot_request_v2(&config, Phase::Phase0)),
             RequestType::MetaData(MetadataRequest::new_v1()),
             RequestType::BlobsByRange(blbrange_request()),
             RequestType::BlobsByRoot(blbroot_request()),
@@ -2316,7 +2341,7 @@ mod tests {
         ));
 
         // Request limits
-        let limit = protocol_id.rpc_request_limits();
+        let limit = protocol_id.rpc_request_limits(&config);
         let mut max = encode_len(limit.max + 1);
         let mut codec = SSZSnappyOutboundCodec::<Mainnet>::new(
             protocol_id.clone(),

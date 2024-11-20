@@ -5,12 +5,13 @@ use futures::future::BoxFuture;
 use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, StreamExt};
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
-use ssz::{ReadError, SszSize as _, SszWrite as _, WriteError};
+use ssz::{ReadError, SszSize as _, SszWrite as _, WriteError, H256};
 use std::io;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
+use std_ext::ArcExt as _;
 use strum::{AsRefStr, Display, EnumString, IntoStaticStr};
 use tokio_io_timeout::TimeoutStream;
 use tokio_util::{
@@ -18,6 +19,8 @@ use tokio_util::{
     compat::{Compat, FuturesAsyncReadCompatExt},
 };
 use typenum::Unsigned as _;
+use types::deneb::containers::BlobIdentifier;
+use types::eip7594::DataColumnIdentifier;
 use types::{
     altair::containers::{
         LightClientBootstrap as AltairLightClientBootstrap,
@@ -25,6 +28,7 @@ use types::{
         LightClientOptimisticUpdate as AltairLightClientOptimisticUpdate,
         LightClientUpdate as AltairLightClientUpdate,
     },
+    config::Config as ChainConfig,
     eip7594::DataColumnSidecar,
     nonstandard::Phase,
     preset::{Mainnet, Preset},
@@ -55,8 +59,6 @@ pub static DATA_COLUMN_MAX: LazyLock<usize> = LazyLock::new(|| {
         .len()
 });
 
-pub const BLOCKS_BY_ROOT_REQUEST_MIN: usize = 0;
-pub const BLOCKS_BY_ROOT_REQUEST_MAX: usize = 32768;
 pub const ERROR_TYPE_MIN: usize = 0;
 pub const ERROR_TYPE_MAX: usize = 256;
 
@@ -361,6 +363,7 @@ impl std::fmt::Display for Encoding {
 
 #[derive(Debug, Clone)]
 pub struct RPCProtocol<P: Preset> {
+    pub chain_config: Arc<ChainConfig>,
     pub fork_context: Arc<ForkContext>,
     pub max_rpc_size: usize,
     pub enable_light_client_server: bool,
@@ -433,7 +436,7 @@ impl AsRef<str> for ProtocolId {
 
 impl ProtocolId {
     /// Returns min and max size for messages of given protocol id requests.
-    pub fn rpc_request_limits(&self) -> RpcLimits {
+    pub fn rpc_request_limits(&self, chain_config: &ChainConfig) -> RpcLimits {
         match self.versioned_protocol.protocol() {
             Protocol::Status => {
                 RpcLimits::new(StatusMessage::SIZE.get(), StatusMessage::SIZE.get())
@@ -446,15 +449,23 @@ impl ProtocolId {
                 OldBlocksByRangeRequestV2::SIZE.get(),
                 OldBlocksByRangeRequestV2::SIZE.get(),
             ),
-            Protocol::BlocksByRoot => {
-                RpcLimits::new(BLOCKS_BY_ROOT_REQUEST_MIN, BLOCKS_BY_ROOT_REQUEST_MAX)
-            }
+            Protocol::BlocksByRoot => RpcLimits::new(
+                0,
+                chain_config.max_request_blocks(Phase::Phase0) as usize * H256::SIZE.get(),
+            ),
             Protocol::BlobsByRange => RpcLimits::new(
                 BlobsByRangeRequest::SIZE.get(),
                 BlobsByRangeRequest::SIZE.get(),
             ),
-            Protocol::BlobsByRoot => RpcLimits::new(0, MaxRequestBlobSidecars::USIZE),
-            Protocol::DataColumnsByRoot => RpcLimits::new(0, MaxRequestDataColumnSidecars::USIZE),
+            Protocol::BlobsByRoot => RpcLimits::new(
+                0,
+                chain_config.max_request_blob_sidecars as usize * BlobIdentifier::SIZE.get(),
+            ),
+            Protocol::DataColumnsByRoot => RpcLimits::new(
+                0,
+                chain_config.max_request_data_column_sidecars as usize
+                    * DataColumnIdentifier::SIZE.get(),
+            ),
             Protocol::DataColumnsByRange => RpcLimits::new(
                 DataColumnsByRangeRequest::ssz_min_len().unwrap_or_default(),
                 DataColumnsByRangeRequest::ssz_max_len()
@@ -570,6 +581,7 @@ where
             let socket = socket.compat();
             let codec = match protocol.encoding {
                 Encoding::SSZSnappy => SSZSnappyInboundCodec::new(
+                    self.chain_config.clone_arc(),
                     protocol,
                     self.max_rpc_size,
                     self.fork_context.clone(),
@@ -938,7 +950,7 @@ impl RPCError {
 
 #[cfg(test)]
 mod tests {
-    use ssz::{ContiguousList, SszWrite as _};
+    use ssz::{ContiguousList, DynamicList, SszWrite as _};
     use types::{
         deneb::containers::BlobSidecar,
         phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::H256},
@@ -951,6 +963,8 @@ mod tests {
 
     #[test]
     fn length_constants_are_calculated_from_ssz_encodings() {
+        let config = ChainConfig::mainnet();
+
         assert_eq!(
             SIGNED_BEACON_BLOCK_PHASE0_MIN,
             Phase0SignedBeaconBlock::<Mainnet>::default()
@@ -972,19 +986,17 @@ mod tests {
                 .unwrap()
                 .len(),
         );
+        assert_eq!(0, DynamicList::<H256>::empty().to_ssz().unwrap().len());
         assert_eq!(
-            BLOCKS_BY_ROOT_REQUEST_MIN,
-            ContiguousList::<H256, MaxRequestBlocks>::default()
-                .to_ssz()
-                .unwrap()
-                .len(),
-        );
-        assert_eq!(
-            BLOCKS_BY_ROOT_REQUEST_MAX,
-            ContiguousList::<H256, MaxRequestBlocks>::full(H256::zero())
-                .to_ssz()
-                .unwrap()
-                .len(),
+            // Previously defined as constant
+            32_768,
+            DynamicList::<H256>::full(
+                H256::zero(),
+                config.max_request_blocks(Phase::Phase0) as usize
+            )
+            .to_ssz()
+            .unwrap()
+            .len(),
         );
         assert_eq!(
             ERROR_TYPE_MIN,

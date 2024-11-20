@@ -20,7 +20,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use types::preset::Preset;
+use std_ext::ArcExt as _;
+use types::{config::Config as ChainConfig, preset::Preset};
 
 use crate::types::ForkContext;
 
@@ -153,6 +154,7 @@ pub struct NetworkParams {
 /// Implements the libp2p `NetworkBehaviour` trait and therefore manages network-level
 /// logic.
 pub struct RPC<Id: ReqId, P: Preset> {
+    chain_config: Arc<ChainConfig>,
     /// Rate limiter
     limiter: Option<RateLimiter>,
     /// Rate limiter for our own requests.
@@ -171,6 +173,7 @@ pub struct RPC<Id: ReqId, P: Preset> {
 
 impl<Id: ReqId, P: Preset> RPC<Id, P> {
     pub fn new(
+        chain_config: Arc<ChainConfig>,
         fork_context: Arc<ForkContext>,
         enable_light_client_server: bool,
         inbound_rate_limiter_config: Option<InboundRateLimiterConfig>,
@@ -192,6 +195,7 @@ impl<Id: ReqId, P: Preset> RPC<Id, P> {
         });
 
         RPC {
+            chain_config,
             limiter: inbound_limiter,
             self_limiter,
             events: Vec::new(),
@@ -284,6 +288,7 @@ where
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
         let protocol = SubstreamProtocol::new(
             RPCProtocol {
+                chain_config: self.chain_config.clone_arc(),
                 fork_context: self.fork_context.clone(),
                 max_rpc_size: max_rpc_size(&self.fork_context, self.network_params.max_chunk_size),
                 enable_light_client_server: self.enable_light_client_server,
@@ -315,6 +320,7 @@ where
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
         let protocol = SubstreamProtocol::new(
             RPCProtocol {
+                chain_config: self.chain_config.clone_arc(),
                 fork_context: self.fork_context.clone(),
                 max_rpc_size: max_rpc_size(&self.fork_context, self.network_params.max_chunk_size),
                 enable_light_client_server: self.enable_light_client_server,

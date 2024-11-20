@@ -384,6 +384,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             resp_timeout: Duration::from_secs(chain_config.resp_timeout),
         };
         let eth2_rpc = RPC::new(
+            chain_config.clone_arc(),
             ctx.fork_context.clone(),
             config.enable_light_client_server,
             config.inbound_rate_limiter_config.clone(),

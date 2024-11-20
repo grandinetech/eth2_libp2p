@@ -5,15 +5,17 @@ use crate::types::{EnrAttestationBitfield, EnrSyncCommitteeBitfield};
 use anyhow::Result;
 use regex::bytes::Regex;
 use serde::Serialize;
-use ssz::{ContiguousList, ReadError, Size, Ssz, SszRead, SszSize, SszWrite, WriteError};
+use ssz::{
+    ContiguousList, DynamicList, ReadError, Size, Ssz, SszRead, SszSize, SszWrite, WriteError,
+};
 use std::marker::PhantomData;
 use std::{collections::BTreeMap, ops::Deref, sync::Arc};
 use strum::IntoStaticStr;
 use try_from_iterator::TryFromIterator as _;
-use typenum::{Prod, Unsigned as _, U1024, U128, U256};
+use typenum::{Unsigned as _, U256};
 use types::deneb::containers::BlobIdentifier;
 use types::eip7594::NumberOfColumns;
-use types::preset::Mainnet;
+use types::nonstandard::Phase;
 use types::{
     combined::{
         LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
@@ -29,17 +31,8 @@ use types::{
 
 const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u64 = 128;
 
-/// Maximum number of blocks in a single request.
-pub type MaxRequestBlocks = U1024;
-
 /// Maximum length of error message.
 pub type MaxErrorLen = U256;
-pub type MaxRequestBlocksDeneb = U128;
-
-pub type MaxRequestBlobSidecars =
-    Prod<MaxRequestBlocksDeneb, <Mainnet as Preset>::MaxBlobsPerBlock>;
-
-pub type MaxRequestDataColumnSidecars = Prod<MaxRequestBlocksDeneb, NumberOfColumns>;
 
 /// Wrapper over SSZ List to represent error message in rpc responses.
 #[derive(Debug, Clone)]
@@ -576,21 +569,39 @@ pub enum BlocksByRootRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlocksByRootRequestV1 {
     /// The list of beacon block bodies being requested.
-    pub block_roots: ContiguousList<H256, MaxRequestBlocks>,
+    pub block_roots: DynamicList<H256>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlocksByRootRequestV2 {
     /// The list of beacon block bodies being requested.
-    pub block_roots: ContiguousList<H256, MaxRequestBlocks>,
+    pub block_roots: DynamicList<H256>,
 }
 
 impl BlocksByRootRequest {
-    pub fn new(block_roots: ContiguousList<H256, MaxRequestBlocks>) -> Self {
+    pub fn new(
+        config: &ChainConfig,
+        phase: Phase,
+        block_roots: impl Iterator<Item = H256>,
+    ) -> Self {
+        let block_roots = DynamicList::from_iter_with_maximum(
+            block_roots,
+            config.max_request_blocks(phase) as usize,
+        );
+
         Self::V2(BlocksByRootRequestV2 { block_roots })
     }
 
-    pub fn new_v1(block_roots: ContiguousList<H256, MaxRequestBlocks>) -> Self {
+    pub fn new_v1(
+        config: &ChainConfig,
+        phase: Phase,
+        block_roots: impl Iterator<Item = H256>,
+    ) -> Self {
+        let block_roots = DynamicList::from_iter_with_maximum(
+            block_roots,
+            config.max_request_blocks(phase) as usize,
+        );
+
         Self::V1(BlocksByRootRequestV1 { block_roots })
     }
 
@@ -601,7 +612,7 @@ impl BlocksByRootRequest {
         }
     }
 
-    pub fn block_roots(self) -> ContiguousList<H256, MaxRequestBlocks> {
+    pub fn block_roots(self) -> DynamicList<H256> {
         match self {
             Self::V1(req) => req.block_roots,
             Self::V2(req) => req.block_roots,
@@ -613,11 +624,19 @@ impl BlocksByRootRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlobsByRootRequest {
     /// The list of beacon block roots being requested.
-    pub blob_ids: ContiguousList<BlobIdentifier, MaxRequestBlobSidecars>,
+    pub blob_ids: DynamicList<BlobIdentifier>,
 }
 
 impl BlobsByRootRequest {
-    pub fn new(blob_ids: ContiguousList<BlobIdentifier, MaxRequestBlobSidecars>) -> Self {
+    pub fn new(
+        config: &ChainConfig,
+        blob_identifiers: impl Iterator<Item = BlobIdentifier>,
+    ) -> Self {
+        let blob_ids = DynamicList::from_iter_with_maximum(
+            blob_identifiers,
+            config.max_request_blob_sidecars as usize,
+        );
+
         Self { blob_ids }
     }
 }
@@ -626,13 +645,19 @@ impl BlobsByRootRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DataColumnsByRootRequest {
     /// The list of beacon block roots and column indices being requested.
-    pub data_column_ids: ContiguousList<DataColumnIdentifier, MaxRequestDataColumnSidecars>,
+    pub data_column_ids: DynamicList<DataColumnIdentifier>,
 }
 
 impl DataColumnsByRootRequest {
     pub fn new(
-        data_column_ids: ContiguousList<DataColumnIdentifier, MaxRequestDataColumnSidecars>,
+        config: &ChainConfig,
+        data_column_identifiers: impl Iterator<Item = DataColumnIdentifier>,
     ) -> Self {
+        let data_column_ids = DynamicList::from_iter_with_maximum(
+            data_column_identifiers,
+            config.max_request_data_column_sidecars as usize,
+        );
+
         Self { data_column_ids }
     }
 

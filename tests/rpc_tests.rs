@@ -771,19 +771,17 @@ async fn test_tcp_blocks_by_root_chunked_rpc() {
     let messages_to_send = 6;
 
     let log = common::build_log(log_level, enable_logging);
+    let config = Arc::new(Config::mainnet().rapid_upgrade());
 
     // get sender/receiver
-    let (mut sender, mut receiver) = common::build_node_pair(
-        &Config::mainnet().rapid_upgrade().into(),
-        &log,
-        Phase::Bellatrix,
-        Protocol::Tcp,
-    )
-    .await;
+    let (mut sender, mut receiver) =
+        common::build_node_pair(&config, &log, Phase::Bellatrix, Protocol::Tcp).await;
 
     // BlocksByRoot Request
     let rpc_request = RequestType::BlocksByRoot(BlocksByRootRequest::new(
-        vec![H256::zero(); 6].try_into().unwrap(),
+        &config,
+        Phase::Phase0,
+        vec![H256::zero(); 6].into_iter(),
     ));
     // BlocksByRoot Response
     let signed_full_block = factory::full_phase0_signed_beacon_block().into();
@@ -901,22 +899,20 @@ async fn test_tcp_blocks_by_root_chunked_rpc_terminates_correctly() {
     let enable_logging = false;
     let messages_to_send: u64 = 10;
     let extra_messages_to_send: u64 = 10;
+    let config = Arc::new(Config::mainnet().rapid_upgrade());
 
     let log = common::build_log(log_level, enable_logging);
 
     // get sender/receiver
 
-    let (mut sender, mut receiver) = common::build_node_pair::<Mainnet>(
-        &Config::mainnet().rapid_upgrade().into(),
-        &log,
-        Phase::Bellatrix,
-        Protocol::Tcp,
-    )
-    .await;
+    let (mut sender, mut receiver) =
+        common::build_node_pair::<Mainnet>(&config, &log, Phase::Bellatrix, Protocol::Tcp).await;
 
     // BlocksByRoot Request
     let rpc_request = RequestType::BlocksByRoot(BlocksByRootRequest::new(
-        vec![H256::zero(); 10].try_into().unwrap(),
+        &config,
+        Phase::Phase0,
+        vec![H256::zero(); 10].into_iter(),
     ));
 
     // BlocksByRoot Response
