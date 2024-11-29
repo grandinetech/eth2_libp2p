@@ -1,4 +1,3 @@
-use self::behaviour::Behaviour;
 use self::gossip_cache::GossipCache;
 use crate::config::{gossipsub_config, GossipsubConfigParams, NetworkLoad};
 use crate::discovery::{
@@ -11,8 +10,6 @@ use crate::peer_manager::{
 use crate::peer_manager::{MIN_OUTBOUND_ONLY_FACTOR, PEER_EXCESS_FACTOR, PRIORITY_PEER_EXCESS};
 use crate::rpc::methods::MetadataRequest;
 use crate::rpc::*;
-use crate::service::behaviour::BehaviourEvent;
-pub use crate::service::behaviour::Gossipsub;
 use crate::types::{
     attestation_sync_committee_topics, fork_core_topics, subnet_from_topic_hash, EnrForkId,
     ForkContext, GossipEncoding, GossipKind, GossipTopic, SnappyTransform, Subnet, SubnetDiscovery,
@@ -32,7 +29,8 @@ use gossipsub::{
 use gossipsub_scoring_parameters::{peer_gossip_thresholds, PeerScoreSettings};
 use libp2p::multiaddr::{self, Multiaddr, Protocol as MProtocol};
 use libp2p::swarm::behaviour::toggle::Toggle;
-use libp2p::swarm::{Swarm, SwarmEvent};
+use libp2p::swarm::{Config, NetworkBehaviour, Swarm, SwarmEvent};
+use libp2p::upnp::tokio::Behaviour as Upnp;
 use libp2p::{identify, PeerId, SwarmBuilder};
 use slog::{crit, debug, info, o, trace, warn};
 use typenum::Unsigned as _;
@@ -58,7 +56,6 @@ use types::{
 use utils::{build_transport, strip_peer_id, Context as ServiceContext, MAX_CONNECTIONS_PER_PEER};
 
 pub mod api_types;
-mod behaviour;
 mod gossip_cache;
 pub mod gossipsub_scoring_parameters;
 pub mod utils;
@@ -115,11 +112,39 @@ pub enum NetworkEvent<AppReqId: ReqId, P: Preset> {
     ZeroListeners,
 }
 
+pub type SubscriptionFilter =
+    gossipsub::MaxCountSubscriptionFilter<gossipsub::WhitelistSubscriptionFilter>;
+pub type Gossipsub = gossipsub::Behaviour<SnappyTransform, SubscriptionFilter>;
+
+#[derive(NetworkBehaviour)]
+pub(crate) struct Behaviour<AppReqId, P>
+where
+    AppReqId: ReqId,
+    P: Preset,
+{
+    /// Keep track of active and pending connections to enforce hard limits.
+    pub connection_limits: libp2p::connection_limits::Behaviour,
+    /// The peer manager that keeps track of peer's reputation and status.
+    pub peer_manager: PeerManager,
+    /// The Eth2 RPC specified in the wire-0 protocol.
+    pub eth2_rpc: RPC<RequestId<AppReqId>, P>,
+    /// Discv5 Discovery protocol.
+    pub discovery: Discovery,
+    /// Keep regular connection to peers and disconnect if absent.
+    // NOTE: The id protocol is used for initial interop. This will be removed by mainnet.
+    /// Provides IP addresses and peer information.
+    pub identify: identify::Behaviour,
+    /// Libp2p UPnP port mapping.
+    pub upnp: Toggle<Upnp>,
+    /// The routing pub-sub mechanism for eth2.
+    pub gossipsub: Gossipsub,
+}
+
 /// Builds the network behaviour that manages the core protocols of eth2.
 /// This core behaviour is managed by `Behaviour` which adds peer management to all core
 /// behaviours.
 pub struct Network<AppReqId: ReqId, P: Preset> {
-    swarm: libp2p::swarm::Swarm<Behaviour<AppReqId, P>>,
+    swarm: Swarm<Behaviour<AppReqId, P>>,
     /* Auxiliary Fields */
     /// A collections of variables accessible outside the network service.
     network_globals: Arc<NetworkGlobals>,
@@ -164,28 +189,36 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             .map(|x| PeerId::from(x.clone()))
             .collect();
 
-        // set up a collection of variables accessible outside of the network crate
-        let network_globals = {
-            // Create an ENR or load from disk if appropriate
-            let enr = crate::discovery::enr::build_or_load_enr::<P>(
-                &chain_config,
-                local_keypair.clone(),
-                &config,
-                &ctx.enr_fork_id,
-                &log,
-            )?;
-            // Construct the metadata
-            let meta_data = utils::load_or_build_metadata(config.network_dir.as_deref(), &log);
-            let globals = NetworkGlobals::new(
-                enr,
-                meta_data,
-                trusted_peers,
-                config.disable_peer_scoring,
-                config.target_subnet_peers,
-                &log,
-            );
-            Arc::new(globals)
-        };
+        // Create an ENR or load from disk if appropriate
+        let enr = crate::discovery::enr::build_or_load_enr::<P>(
+            &chain_config,
+            local_keypair.clone(),
+            &config,
+            &ctx.enr_fork_id,
+            &log,
+        )?;
+
+        // Construct the metadata
+        let custody_subnet_count = chain_config.is_eip7594_enabled().then(|| {
+            enr.custody_subnet_count(&chain_config)
+                .expect("invalid custody subnet count in ENR")
+        });
+        let meta_data = utils::load_or_build_metadata(
+            config.network_dir.as_deref(),
+            custody_subnet_count,
+            &log,
+        );
+        let seq_number = meta_data.seq_number();
+        let globals = NetworkGlobals::new(
+            enr,
+            meta_data,
+            trusted_peers,
+            config.disable_peer_scoring,
+            3,
+            &log,
+            chain_config.clone(),
+        );
+        let network_globals = Arc::new(globals);
 
         // Grab our local ENR FORK ID
         let enr_fork_id = network_globals
@@ -251,6 +284,8 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                 )
             };
 
+            trace!(log, "Using peer score params"; "params" => ?params);
+
             // Set up a scoring update interval
             let update_gossipsub_scores = tokio::time::interval(params.decay_interval);
             let possible_fork_digests = ctx.fork_context.all_fork_digests();
@@ -258,6 +293,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             let max_topics = AttestationSubnetCount::USIZE
                 + SyncCommitteeSubnetCount::USIZE
                 + BlobSidecarSubnetCount::USIZE
+                + chain_config.data_column_sidecar_subnet_count as usize
                 + BASE_CORE_TOPICS.len()
                 + ALTAIR_CORE_TOPICS.len()
                 + CAPELLA_CORE_TOPICS.len()
@@ -270,10 +306,11 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     AttestationSubnetCount::U64,
                     SyncCommitteeSubnetCount::U64,
                     BlobSidecarSubnetCount::U64,
+                    chain_config.data_column_sidecar_subnet_count,
                 ),
                 // during a fork we subscribe to both the old and new topics
                 max_subscribed_topics: max_topics * 4,
-                // 162 in theory = (64 attestation + 4 sync committee + 7 core topics + 6 blob topics) * 2
+                // 418 in theory = (64 attestation + 4 sync committee + 7 core topics + 6 blob topics + 128 column topics) * 2
                 max_subscriptions_per_request: max_topics * 2,
             };
 
@@ -335,6 +372,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             config.outbound_rate_limiter_config.clone(),
             log.clone(),
             network_params,
+            seq_number,
         );
 
         let discovery = {
@@ -434,7 +472,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         // sets up the libp2p swarm.
 
         let swarm = {
-            let config = libp2p::swarm::Config::with_executor(Executor(executor))
+            let config = Config::with_executor(Executor(executor))
                 .with_notify_handler_buffer_size(NonZeroUsize::new(7).expect("Not zero"))
                 .with_per_connection_event_buffer_size(4)
                 .with_dial_concurrency_factor(NonZeroU8::new(1).unwrap());
@@ -797,55 +835,57 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         }
     }
 
-    /// Publishes message on the pubsub (gossipsub) behaviour, choosing the encoding.
-    pub fn publish(&mut self, message: PubsubMessage<P>) {
-        for topic in message.topics(GossipEncoding::default(), self.enr_fork_id.fork_digest) {
-            let message_data = message.encode(GossipEncoding::default()).expect("TODO");
+    /// Publishes a list of messages on the pubsub (gossipsub) behaviour, choosing the encoding.
+    pub fn publish(&mut self, messages: Vec<PubsubMessage<P>>) {
+        for message in messages {
+            for topic in message.topics(GossipEncoding::default(), self.enr_fork_id.fork_digest) {
+                let message_data = message.encode(GossipEncoding::default()).expect("TODO");
 
-            if let Err(e) = self
-                .gossipsub_mut()
-                .publish(Topic::from(topic.clone()), message_data.clone())
-            {
-                match e {
-                    PublishError::Duplicate => {
-                        debug!(
-                            self.log,
-                            "Attempted to publish duplicate message";
-                            "kind" => %topic.kind(),
-                        );
+                if let Err(e) = self
+                    .gossipsub_mut()
+                    .publish(Topic::from(topic.clone()), message_data.clone())
+                {
+                    match e {
+                        PublishError::Duplicate => {
+                            debug!(
+                                self.log,
+                                "Attempted to publish duplicate message";
+                                "kind" => %topic.kind(),
+                            );
+                        }
+                        ref e => {
+                            warn!(
+                                self.log,
+                                "Could not publish message";
+                                "error" => ?e,
+                                "kind" => %topic.kind(),
+                            );
+                        }
                     }
-                    ref e => {
-                        warn!(
-                            self.log,
-                            "Could not publish message";
-                            "error" => ?e,
-                            "kind" => %topic.kind(),
-                        );
-                    }
-                }
 
-                // add to metrics
-                match topic.kind() {
-                    GossipKind::Attestation(subnet_id) => {
-                        if let Some(v) = crate::common::metrics::get_int_gauge(
-                            &metrics::FAILED_ATTESTATION_PUBLISHES_PER_SUBNET,
-                            &[&subnet_id.to_string()],
-                        ) {
-                            v.inc()
-                        };
+                    // add to metrics
+                    match topic.kind() {
+                        GossipKind::Attestation(subnet_id) => {
+                            if let Some(v) = crate::common::metrics::get_int_gauge(
+                                &metrics::FAILED_ATTESTATION_PUBLISHES_PER_SUBNET,
+                                &[&subnet_id.to_string()],
+                            ) {
+                                v.inc()
+                            };
+                        }
+                        kind => {
+                            if let Some(v) = crate::common::metrics::get_int_gauge(
+                                &metrics::FAILED_PUBLISHES_PER_MAIN_TOPIC,
+                                &[&format!("{:?}", kind)],
+                            ) {
+                                v.inc()
+                            };
+                        }
                     }
-                    kind => {
-                        if let Some(v) = crate::common::metrics::get_int_gauge(
-                            &metrics::FAILED_PUBLISHES_PER_MAIN_TOPIC,
-                            &[&format!("{:?}", kind)],
-                        ) {
-                            v.inc()
-                        };
-                    }
-                }
 
-                if let PublishError::InsufficientPeers = e {
-                    self.gossip_cache.insert(topic, message_data);
+                    if let PublishError::InsufficientPeers = e {
+                        self.gossip_cache.insert(topic, message_data);
+                    }
                 }
             }
         }
@@ -1110,49 +1150,41 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             .sync_committee_bitfield()
             .expect("Local discovery must have sync committee bitfield");
 
-        {
-            // write lock scope
-            let mut meta_data = self.network_globals.local_metadata.write();
+        // write lock scope
+        let mut meta_data = self.network_globals.local_metadata.write();
 
-            *meta_data.seq_number_mut() += 1;
-            *meta_data.attnets_mut() = local_attnets;
-            if let Some(syncnets) = meta_data.syncnets_mut() {
-                *syncnets = local_syncnets;
-            }
+        *meta_data.seq_number_mut() += 1;
+        *meta_data.attnets_mut() = local_attnets;
+        if let Some(syncnets) = meta_data.syncnets_mut() {
+            *syncnets = local_syncnets;
         }
-        // Save the updated metadata to disk
-        utils::save_metadata_to_disk(
-            self.network_dir.as_deref(),
-            self.network_globals.local_metadata.read().clone(),
-            &self.log,
-        );
+
+        let seq_number = meta_data.seq_number();
+        let metadata = meta_data.clone();
+
+        drop(meta_data);
+
+        // Update RPC seq_number and save the updated metadata to disk
+        self.eth2_rpc_mut().update_seq_number(seq_number);
+        utils::save_metadata_to_disk(self.network_dir.as_deref(), metadata, &self.log);
     }
 
     /// Sends a Ping request to the peer.
     fn ping(&mut self, peer_id: PeerId) {
-        let ping = crate::rpc::Ping {
-            data: self.network_globals.local_metadata.read().seq_number(),
-        };
-        trace!(self.log, "Sending Ping"; "peer_id" => %peer_id);
-        let id = RequestId::Internal;
-        self.eth2_rpc_mut()
-            .send_request(peer_id, id, OutboundRequest::Ping(ping));
-    }
-
-    /// Sends a Pong response to the peer.
-    fn pong(&mut self, id: PeerRequestId, peer_id: PeerId) {
-        let ping = crate::rpc::Ping {
-            data: self.network_globals.local_metadata.read().seq_number(),
-        };
-        trace!(self.log, "Sending Pong"; "request_id" => id.1, "peer_id" => %peer_id);
-        let event = RPCCodedResponse::Success(RPCResponse::Pong(ping));
-        self.eth2_rpc_mut().send_response(peer_id, id, event);
+        self.eth2_rpc_mut().ping(peer_id, RequestId::Internal);
     }
 
     /// Sends a METADATA request to a peer.
     fn send_meta_data_request(&mut self, peer_id: PeerId) {
-        // We always prefer sending V2 requests
-        let event = OutboundRequest::MetaData(MetadataRequest::new_v2());
+        let event = if self.fork_context.is_eip7594_enabled() {
+            // Nodes with higher custody will probably start advertising it
+            // before peerdas is activated
+            OutboundRequest::MetaData(MetadataRequest::new_v3())
+        } else {
+            // We always prefer sending V2 requests
+            OutboundRequest::MetaData(MetadataRequest::new_v2())
+        };
+
         self.eth2_rpc_mut()
             .send_request(peer_id, RequestId::Internal, event);
     }
@@ -1160,15 +1192,11 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
     /// Sends a METADATA response to a peer.
     fn send_meta_data_response(
         &mut self,
-        req: MetadataRequest<P>,
+        _req: MetadataRequest<P>,
         id: PeerRequestId,
         peer_id: PeerId,
     ) {
         let metadata = self.network_globals.local_metadata.read().clone();
-        let metadata = match req {
-            MetadataRequest::V1(_) => metadata.metadata_v1(),
-            MetadataRequest::V2(_) => metadata,
-        };
         let event = RPCCodedResponse::Success(RPCResponse::MetaData(metadata));
         self.eth2_rpc_mut().send_response(peer_id, id, event);
     }
@@ -1233,7 +1261,16 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                 &metrics::TOTAL_RPC_REQUESTS,
                 &["blobs_by_root"],
             ),
-        }
+            Request::DataColumnsByRoot { .. } => crate::common::metrics::inc_counter_vec(
+                &metrics::TOTAL_RPC_REQUESTS,
+                &["data_columns_by_root"],
+            ),
+            Request::DataColumnsByRange { .. } => crate::common::metrics::inc_counter_vec(
+                &metrics::TOTAL_RPC_REQUESTS,
+                &["data_columns_by_range"],
+            ),
+        };
+
         NetworkEvent::RequestReceived {
             peer_id,
             id,
@@ -1262,7 +1299,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             self.discovery_mut().remove_cached_enr(&enr.peer_id());
             let peer_id = enr.peer_id();
             if self.peer_manager_mut().dial_peer(enr) {
-                debug!(self.log, "Dialing cached ENR peer"; "peer_id" => %peer_id);
+                debug!(self.log, "Added cached ENR peer to dial queue"; "peer_id" => %peer_id);
             }
         }
     }
@@ -1416,9 +1453,10 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         let peer_id = event.peer_id;
 
         // Do not permit Inbound events from peers that are being disconnected, or RPC requests.
+        // but allow `RpcFailed` and `HandlerErr::Outbound` to be bubble up to sync for state management.
         if !self.peer_manager().is_connected(&peer_id)
-            && (matches!(event.event, HandlerEvent::Err(HandlerErr::Inbound { .. }))
-                || matches!(event.event, HandlerEvent::Ok(RPCReceived::Request(..))))
+            && (matches!(event.message, Err(HandlerErr::Inbound { .. }))
+                || matches!(event.message, Ok(RPCReceived::Request(..))))
         {
             debug!(
                 self.log,
@@ -1430,8 +1468,8 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
 
         let handler_id = event.conn_id;
         // The METADATA and PING RPC responses are handled within the behaviour and not propagated
-        match event.event {
-            HandlerEvent::Err(handler_err) => {
+        match event.message {
+            Err(handler_err) => {
                 match handler_err {
                     HandlerErr::Inbound {
                         id: _,
@@ -1466,15 +1504,13 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     }
                 }
             }
-            HandlerEvent::Ok(RPCReceived::Request(id, request)) => {
+            Ok(RPCReceived::Request(id, request)) => {
                 let peer_request_id = (handler_id, id);
                 match request {
                     /* Behaviour managed protocols: Ping and Metadata */
                     InboundRequest::Ping(ping) => {
                         // inform the peer manager and send the response
                         self.peer_manager_mut().ping_request(&peer_id, ping.data);
-                        // send a ping response
-                        self.pong(peer_request_id, peer_id);
                         None
                     }
                     InboundRequest::MetaData(req) => {
@@ -1555,6 +1591,22 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                             self.build_request(peer_request_id, peer_id, Request::BlobsByRoot(req));
                         Some(event)
                     }
+                    InboundRequest::DataColumnsByRoot(req) => {
+                        let event = self.build_request(
+                            peer_request_id,
+                            peer_id,
+                            Request::DataColumnsByRoot(req),
+                        );
+                        Some(event)
+                    }
+                    InboundRequest::DataColumnsByRange(req) => {
+                        let event = self.build_request(
+                            peer_request_id,
+                            peer_id,
+                            Request::DataColumnsByRange(req),
+                        );
+                        Some(event)
+                    }
                     InboundRequest::LightClientBootstrap(req) => {
                         let event = self.build_request(
                             peer_request_id,
@@ -1581,7 +1633,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     }
                 }
             }
-            HandlerEvent::Ok(RPCReceived::Response(id, resp)) => {
+            Ok(RPCReceived::Response(id, resp)) => {
                 match resp {
                     /* Behaviour managed protocols */
                     RPCResponse::Pong(ping) => {
@@ -1612,6 +1664,12 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     RPCResponse::BlobsByRoot(resp) => {
                         self.build_response(id, peer_id, Response::BlobsByRoot(Some(resp)))
                     }
+                    RPCResponse::DataColumnsByRoot(resp) => {
+                        self.build_response(id, peer_id, Response::DataColumnsByRoot(Some(resp)))
+                    }
+                    RPCResponse::DataColumnsByRange(resp) => {
+                        self.build_response(id, peer_id, Response::DataColumnsByRange(Some(resp)))
+                    }
                     // Should never be reached
                     RPCResponse::LightClientBootstrap(bootstrap) => {
                         self.build_response(id, peer_id, Response::LightClientBootstrap(bootstrap))
@@ -1628,18 +1686,16 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     ),
                 }
             }
-            HandlerEvent::Ok(RPCReceived::EndOfStream(id, termination)) => {
+            Ok(RPCReceived::EndOfStream(id, termination)) => {
                 let response = match termination {
                     ResponseTermination::BlocksByRange => Response::BlocksByRange(None),
                     ResponseTermination::BlocksByRoot => Response::BlocksByRoot(None),
                     ResponseTermination::BlobsByRange => Response::BlobsByRange(None),
                     ResponseTermination::BlobsByRoot => Response::BlobsByRoot(None),
+                    ResponseTermination::DataColumnsByRoot => Response::DataColumnsByRoot(None),
+                    ResponseTermination::DataColumnsByRange => Response::DataColumnsByRange(None),
                 };
                 self.build_response(id, peer_id, response)
-            }
-            HandlerEvent::Close(_) => {
-                // NOTE: This is handled in the RPC behaviour.
-                None
             }
         }
     }
@@ -1650,7 +1706,11 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         event: identify::Event,
     ) -> Option<NetworkEvent<AppReqId, P>> {
         match event {
-            identify::Event::Received { peer_id, mut info } => {
+            identify::Event::Received {
+                peer_id,
+                mut info,
+                connection_id: _,
+            } => {
                 if info.listen_addrs.len() > MAX_IDENTIFY_ADDRESSES {
                     debug!(
                         self.log,

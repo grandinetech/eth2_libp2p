@@ -1,12 +1,20 @@
 //! A collection of variables that are accessible outside of the network thread itself.
 use crate::peer_manager::peerdb::PeerDB;
-use crate::rpc::{MetaData, MetaDataV2};
+use crate::rpc::{MetaData, MetaDataV3};
 use crate::types::{BackFillState, SyncState};
-use crate::Client;
 use crate::EnrExt;
+use crate::{Client, Eth2Enr};
 use crate::{Enr, GossipTopic, Multiaddr, PeerId};
+use helper_functions::misc;
+use itertools::Itertools;
 use parking_lot::RwLock;
+use ssz::Uint256;
 use std::collections::HashSet;
+use std::sync::Arc;
+use types::{
+    config::Config as ChainConfig,
+    eip7594::{ColumnIndex, DataColumnSubnetId},
+};
 
 pub struct NetworkGlobals {
     /// The current local ENR.
@@ -27,6 +35,8 @@ pub struct NetworkGlobals {
     pub backfill_state: RwLock<BackFillState>,
     /// Target subnet peers.
     pub target_subnet_peers: usize,
+    /// Network-related configuration. Immutable after initialization.
+    pub config: Arc<ChainConfig>,
 }
 
 impl NetworkGlobals {
@@ -37,6 +47,7 @@ impl NetworkGlobals {
         disable_peer_scoring: bool,
         target_subnet_peers: usize,
         log: &slog::Logger,
+        config: Arc<ChainConfig>,
     ) -> Self {
         NetworkGlobals {
             local_enr: RwLock::new(enr.clone()),
@@ -48,6 +59,7 @@ impl NetworkGlobals {
             sync_state: RwLock::new(SyncState::Stalled),
             backfill_state: RwLock::new(BackFillState::NotRequired),
             target_subnet_peers,
+            config,
         }
     }
 
@@ -118,23 +130,134 @@ impl NetworkGlobals {
         std::mem::replace(&mut *self.sync_state.write(), new_state)
     }
 
+    /// Get subnet sampling size to custody data column sidecars
+    /// get custody subnet count from Metadata cache.
+    /// if not available, get from `csc` field of ENR object instead.
+    /// then, compare with max(config.samples_per_slot, custody_subnet_count)
+    pub fn subnet_sampling_size(&self, enr: Enr) -> u64 {
+        let custody_subnet_count = self
+            .local_metadata
+            .read()
+            .custody_subnet_count()
+            .unwrap_or_else(|| {
+                enr.custody_subnet_count(&self.config)
+                    .expect("custody subnet count must be set if PeerDAS is scheduled")
+            });
+
+        custody_subnet_count.max(self.config.samples_per_slot)
+    }
+
+    /// Compute custody data columns the node is assigned to custody.
+    pub fn custody_columns(&self) -> Vec<ColumnIndex> {
+        let enr = self.local_enr();
+        let node_id = Uint256::from_be_bytes(enr.node_id().raw());
+        // TODO(das): cache this number at start-up to not make this fallible
+        let subnet_sampling_size = self.subnet_sampling_size(enr);
+        eip_7594::get_custody_columns(node_id, subnet_sampling_size, &self.config).collect_vec()
+    }
+
+    /// Compute custody data column subnets the node is assigned to custody.
+    pub fn custody_subnets(&self) -> impl Iterator<Item = DataColumnSubnetId> {
+        let enr = self.local_enr();
+        let node_id = Uint256::from_be_bytes(enr.node_id().raw());
+        let subnet_sampling_size = self.subnet_sampling_size(enr);
+        eip_7594::get_custody_subnets(node_id, subnet_sampling_size, &self.config)
+    }
+
+    /// Returns a connected peer that:
+    /// 1. is connected
+    /// 2. assigned to custody the column based on it's `custody_subnet_count` from metadata
+    /// 3. has a good score
+    pub fn custody_peers_for_column(&self, column_index: ColumnIndex) -> Vec<PeerId> {
+        self.peers
+            .read()
+            .good_custody_subnet_peer(misc::compute_subnet_for_data_column_sidecar(
+                column_index,
+                &self.config,
+            ))
+            .cloned()
+            .collect::<Vec<_>>()
+    }
+
     /// TESTING ONLY. Build a dummy NetworkGlobals instance.
-    pub fn new_test_globals(trusted_peers: Vec<PeerId>, log: &slog::Logger) -> NetworkGlobals {
+    pub fn new_test_globals(
+        trusted_peers: Vec<PeerId>,
+        custody_subnet_count: u64,
+        log: &slog::Logger,
+        config: &Arc<ChainConfig>,
+    ) -> NetworkGlobals {
         use crate::CombinedKeyExt;
         let keypair = libp2p::identity::secp256k1::Keypair::generate();
         let enr_key: discv5::enr::CombinedKey = discv5::enr::CombinedKey::from_secp256k1(&keypair);
         let enr = discv5::enr::Enr::builder().build(&enr_key).unwrap();
         NetworkGlobals::new(
             enr,
-            MetaData::V2(MetaDataV2 {
+            MetaData::V3(MetaDataV3 {
                 seq_number: 0,
                 attnets: Default::default(),
                 syncnets: Default::default(),
+                custody_subnet_count,
             }),
             trusted_peers,
             false,
             3,
             log,
+            config.clone(),
         )
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::NetworkGlobals;
+    use slog::{o, Drain};
+    use std::sync::Arc;
+    use typenum::Unsigned as _;
+    use types::{config::Config as ChainConfig, eip7594::NumberOfColumns};
+
+    pub fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+
+        if enabled {
+            slog::Logger::root(drain.filter_level(level).fuse(), o!())
+        } else {
+            slog::Logger::root(drain.filter(|_| false).fuse(), o!())
+        }
+    }
+
+    #[test]
+    fn test_custody_count_default() {
+        let log = build_log(slog::Level::Debug, false);
+        let config = Arc::new(ChainConfig::default());
+        let default_custody_requirement_column_count = NumberOfColumns::U64
+            / config.data_column_sidecar_subnet_count
+            * config.custody_requirement;
+
+        let globals = NetworkGlobals::new_test_globals(
+            vec![],
+            default_custody_requirement_column_count,
+            &log,
+            &config,
+        );
+        let columns = globals.custody_columns();
+
+        assert_eq!(columns.len(), config.samples_per_slot as usize);
+    }
+
+    #[test]
+    fn test_custody_all_columns() {
+        let log = build_log(slog::Level::Debug, false);
+        let config = Arc::new(ChainConfig::default());
+        let globals = NetworkGlobals::new_test_globals(
+            vec![],
+            config.data_column_sidecar_subnet_count,
+            &log,
+            &config,
+        );
+        let columns = globals.custody_columns();
+
+        assert_eq!(columns.len(), NumberOfColumns::USIZE,);
     }
 }

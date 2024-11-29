@@ -17,6 +17,7 @@ pub struct ForkContext {
     current_fork: RwLock<Phase>,
     fork_to_digest: HashMap<Phase, ForkDigest>,
     digest_to_fork: HashMap<ForkDigest, Phase>,
+    is_eip7594_enabled: bool,
 }
 
 impl ForkContext {
@@ -38,12 +39,14 @@ impl ForkContext {
 
         let digest_to_fork = fork_to_digest.iter().map(|(k, v)| (*v, *k)).collect();
         let current_fork = RwLock::new(config.phase_at_slot::<P>(current_slot));
+        let is_eip7594_enabled = config.is_eip7594_enabled();
 
         Self {
             chain_config: config.clone(),
             current_fork,
             fork_to_digest,
             digest_to_fork,
+            is_eip7594_enabled,
         }
     }
 
@@ -98,5 +101,10 @@ impl ForkContext {
 
     pub fn chain_config(&self) -> &Arc<Config> {
         &self.chain_config
+    }
+
+    /// Return `true` if EIP7594 is enabled or scheduled
+    pub fn is_eip7594_enabled(&self) -> bool {
+        self.is_eip7594_enabled
     }
 }

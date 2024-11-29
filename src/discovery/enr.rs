@@ -1,5 +1,6 @@
 //! Helper functions and an extension trait for Ethereum 2 ENRs.
 
+use bytes::Bytes;
 pub use discv5::enr::CombinedKey;
 
 use super::enr_ext::CombinedKeyExt;
@@ -36,44 +37,56 @@ pub trait Eth2Enr {
     fn sync_committee_bitfield(&self) -> Result<EnrSyncCommitteeBitfield, &'static str>;
 
     /// The peerdas custody subnet count associated with the ENR.
-    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> u64;
+    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> Result<u64, &'static str>;
 
     fn eth2(&self) -> Result<EnrForkId, &'static str>;
 }
 
 impl Eth2Enr for Enr {
     fn attestation_bitfield(&self) -> Result<EnrAttestationBitfield, &'static str> {
-        let bitfield_bytes = self
-            .get(ATTESTATION_BITFIELD_ENR_KEY)
-            .ok_or("ENR attestation bitfield non-existent")?;
+        let bitfield_bytes: Bytes = self
+            .get_decodable(ATTESTATION_BITFIELD_ENR_KEY)
+            .ok_or("ENR attestation bitfield non-existent")?
+            .map_err(|_| "Invalid RLP Encoding")?;
 
-        EnrAttestationBitfield::from_ssz_default(bitfield_bytes)
+        EnrAttestationBitfield::from_ssz_default(&bitfield_bytes)
             .map_err(|_| "Could not decode the ENR attnets bitfield")
     }
 
     fn sync_committee_bitfield(&self) -> Result<EnrSyncCommitteeBitfield, &'static str> {
-        let bitfield_bytes = self
-            .get(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
-            .ok_or("ENR sync committee bitfield non-existent")?;
+        let bitfield_bytes: Bytes = self
+            .get_decodable(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
+            .ok_or("ENR sync committee bitfield non-existent")?
+            .map_err(|_| "Invalid RLP Encoding")?;
 
-        EnrSyncCommitteeBitfield::from_ssz_default(bitfield_bytes)
+        EnrSyncCommitteeBitfield::from_ssz_default(&bitfield_bytes)
             .map_err(|_| "Could not decode the ENR syncnets bitfield")
     }
 
     /// if the custody value is non-existent in the ENR, then we assume the minimum custody value
     /// defined in the spec.
-    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> u64 {
-        self.get_decodable::<u64>(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY)
-            .and_then(|r| r.ok())
-            // If value supplied in ENR is invalid, fallback to `custody_requirement`
-            .filter(|csc| csc <= &chain_config.data_column_sidecar_subnet_count)
-            .unwrap_or(chain_config.custody_requirement)
+    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> Result<u64, &'static str> {
+        let csc = self
+            .get_decodable::<u64>(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY)
+            .ok_or("ENR custody subnet count non-existent")?
+            .map_err(|_| "Could not decode the ENR custody subnet count")?;
+
+        if csc <= chain_config.data_column_sidecar_subnet_count
+            && csc >= chain_config.custody_requirement
+        {
+            Ok(csc)
+        } else {
+            Err("Invalid custody subnet count in ENR")
+        }
     }
 
     fn eth2(&self) -> Result<EnrForkId, &'static str> {
-        let eth2_bytes = self.get(ETH2_ENR_KEY).ok_or("ENR has no eth2 field")?;
+        let eth2_bytes: Bytes = self
+            .get_decodable(ETH2_ENR_KEY)
+            .ok_or("ENR has no eth2 field")?
+            .map_err(|_| "Invalid RLP Encoding")?;
 
-        EnrForkId::from_ssz_default(eth2_bytes).map_err(|_| "Could not decode EnrForkId")
+        EnrForkId::from_ssz_default(&eth2_bytes).map_err(|_| "Could not decode EnrForkId")
     }
 }
 
@@ -230,23 +243,20 @@ pub fn build_enr(
     }
 
     // set the `eth2` field on our ENR
-    builder.add_value(ETH2_ENR_KEY, &enr_fork_id.to_ssz()?.as_slice());
+    builder.add_value::<Bytes>(ETH2_ENR_KEY, &enr_fork_id.to_ssz()?.into());
 
     // set the "attnets" field on our ENR
     let bitfield = EnrAttestationBitfield::default();
 
-    builder.add_value(ATTESTATION_BITFIELD_ENR_KEY, &bitfield.to_ssz()?.as_slice());
+    builder.add_value::<Bytes>(ATTESTATION_BITFIELD_ENR_KEY, &bitfield.to_ssz()?.into());
 
     // set the "syncnets" field on our ENR
     let bitfield = EnrSyncCommitteeBitfield::default();
 
-    builder.add_value(
-        SYNC_COMMITTEE_BITFIELD_ENR_KEY,
-        &bitfield.to_ssz()?.as_slice(),
-    );
+    builder.add_value::<Bytes>(SYNC_COMMITTEE_BITFIELD_ENR_KEY, &bitfield.to_ssz()?.into());
 
     // only set `csc` if PeerDAS fork epoch has been scheduled
-    if chain_config.is_eip7594_fork_epoch_set() {
+    if chain_config.is_eip7594_enabled() {
         let custody_subnet_count = if config.subscribe_all_data_column_subnets {
             chain_config.data_column_sidecar_subnet_count
         } else {
@@ -274,16 +284,16 @@ fn compare_enr(local_enr: &Enr, disk_enr: &Enr) -> bool {
         && local_enr.quic4() == disk_enr.quic4()
         && local_enr.quic6() == disk_enr.quic6()
         // must match on the same fork
-        && local_enr.get(ETH2_ENR_KEY) == disk_enr.get(ETH2_ENR_KEY)
+        && local_enr.get_decodable::<Bytes>(ETH2_ENR_KEY) == disk_enr.get_decodable(ETH2_ENR_KEY)
         // take preference over disk udp port if one is not specified
         && (local_enr.udp4().is_none() || local_enr.udp4() == disk_enr.udp4())
         && (local_enr.udp6().is_none() || local_enr.udp6() == disk_enr.udp6())
         // we need the ATTESTATION_BITFIELD_ENR_KEY and SYNC_COMMITTEE_BITFIELD_ENR_KEY and
         // PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY key to match, otherwise we use a new ENR. This will
         // likely only be true for non-validating nodes.
-        && local_enr.get(ATTESTATION_BITFIELD_ENR_KEY) == disk_enr.get(ATTESTATION_BITFIELD_ENR_KEY)
-        && local_enr.get(SYNC_COMMITTEE_BITFIELD_ENR_KEY) == disk_enr.get(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
-        && local_enr.get(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY) == disk_enr.get(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY)
+        && local_enr.get_decodable::<Bytes>(ATTESTATION_BITFIELD_ENR_KEY) == disk_enr.get_decodable(ATTESTATION_BITFIELD_ENR_KEY)
+        && local_enr.get_decodable::<Bytes>(SYNC_COMMITTEE_BITFIELD_ENR_KEY) == disk_enr.get_decodable(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
+        && local_enr.get_decodable::<Bytes>(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY) == disk_enr.get_decodable(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY)
 }
 
 /// Loads enr from the given directory
@@ -332,6 +342,17 @@ mod test {
         chain_config
     }
 
+    fn build_enr_with_config(
+        chain_config: &ChainConfig,
+        config: NetworkConfig,
+    ) -> (Enr, CombinedKey) {
+        let keypair = libp2p::identity::secp256k1::Keypair::generate();
+        let enr_key = CombinedKey::from_secp256k1(&keypair);
+        let enr_fork_id = EnrForkId::default();
+        let enr = build_enr(chain_config, &enr_key, &config, &enr_fork_id).unwrap();
+        (enr, enr_key)
+    }
+
     #[test]
     fn custody_subnet_count_default() {
         let config = NetworkConfig {
@@ -343,7 +364,7 @@ mod test {
         let enr = build_enr_with_config(&chain_config, config).0;
 
         assert_eq!(
-            enr.custody_subnet_count(&chain_config),
+            enr.custody_subnet_count(&chain_config).unwrap(),
             chain_config.custody_requirement,
         );
     }
@@ -358,39 +379,27 @@ mod test {
         let enr = build_enr_with_config(&chain_config, config).0;
 
         assert_eq!(
-            enr.custody_subnet_count(&chain_config),
+            enr.custody_subnet_count(&chain_config).unwrap(),
             chain_config.data_column_sidecar_subnet_count,
         );
     }
 
     #[test]
-    fn custody_subnet_count_fallback_default() {
-        let config = NetworkConfig::default();
+    fn test_encode_decode_eth2_enr() {
         let chain_config = make_eip7594_config();
-        let (mut enr, enr_key) = build_enr_with_config(&chain_config, config);
-        let invalid_subnet_count = 99u64;
-
-        enr.insert(
-            PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY,
-            &invalid_subnet_count,
-            &enr_key,
-        )
-        .unwrap();
-
-        assert_eq!(
-            enr.custody_subnet_count(&chain_config),
-            chain_config.custody_requirement,
-        );
+        let (enr, _key) = build_enr_with_config(&chain_config, NetworkConfig::default());
+        // Check all Eth2 Mappings are decodeable
+        enr.eth2().unwrap();
+        enr.attestation_bitfield().unwrap();
+        enr.sync_committee_bitfield().unwrap();
     }
 
-    fn build_enr_with_config(
-        chain_config: &ChainConfig,
-        config: NetworkConfig,
-    ) -> (Enr, CombinedKey) {
-        let keypair = libp2p::identity::secp256k1::Keypair::generate();
-        let enr_key = CombinedKey::from_secp256k1(&keypair);
-        let enr_fork_id = EnrForkId::default();
-        let enr = build_enr(chain_config, &enr_key, &config, &enr_fork_id).unwrap();
-        (enr, enr_key)
+    #[test]
+    fn test_eth2_enr_encodings() {
+        let enr_str = "enr:-Mm4QEX9fFRi1n4H3M9sGIgFQ6op1IysTU4Gz6tpIiOGRM1DbJtIih1KgGgv3Xl-oUlwco3HwdXsbYuXStBuNhUVIPoBh2F0dG5ldHOIAAAAAAAAAACDY3NjBIRldGgykI-3hTFgAAA4AOH1BQAAAACCaWSCdjSCaXCErBAADoRxdWljgiMpiXNlY3AyNTZrMaECph91xMyTVyE5MVj6lBpPgz6KP2--Kr9lPbo6_GjrfRKIc3luY25ldHMAg3RjcIIjKIN1ZHCCIyg";
+        let enr = Enr::from_str(enr_str).unwrap();
+        enr.eth2().unwrap();
+        enr.attestation_bitfield().unwrap();
+        enr.sync_committee_bitfield().unwrap();
     }
 }

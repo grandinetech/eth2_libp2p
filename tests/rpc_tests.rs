@@ -216,6 +216,7 @@ async fn test_blocks_by_range_chunked_rpc() {
     // keep count of the number of messages received
     let mut messages_received = 0;
     let request_id = messages_to_send as usize;
+
     // build the sender future
     let sender_future = async {
         loop {
@@ -337,6 +338,7 @@ async fn test_blobs_by_range_chunked_rpc() {
     // keep count of the number of messages received
     let mut messages_received = 0;
     let request_id = messages_to_send as usize;
+
     // build the sender future
     let sender_future = async {
         loop {
@@ -439,8 +441,8 @@ async fn test_blocks_by_range_over_limit() {
     .into();
 
     let rpc_response_merge_large = Response::BlocksByRange(Some(Arc::new(signed_full_block)));
-
     let request_id = messages_to_send as usize;
+
     // build the sender future
     let sender_future = async {
         loop {
@@ -527,6 +529,7 @@ async fn blocks_by_range_chunked_rpc_terminates_correctly() {
     // keep count of the number of messages received
     let mut messages_received: u64 = 0;
     let request_id = messages_to_send as usize;
+
     // build the sender future
     let sender_future = async {
         loop {
@@ -650,6 +653,7 @@ async fn test_blocks_by_range_single_empty_rpc() {
 
     // keep count of the number of messages received
     let mut messages_received = 0;
+
     // build the sender future
     let sender_future = async {
         loop {
@@ -761,6 +765,7 @@ async fn test_blocks_by_root_chunked_rpc() {
 
     // keep count of the number of messages received
     let mut messages_received = 0;
+
     // build the sender future
     let sender_future = async {
         loop {
@@ -880,6 +885,7 @@ async fn test_blocks_by_root_chunked_rpc_terminates_correctly() {
 
     // keep count of the number of messages received
     let mut messages_received = 0;
+
     // build the sender future
     let sender_future = async {
         loop {

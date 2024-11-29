@@ -8,10 +8,10 @@ use futures::future::BoxFuture;
 use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, StreamExt};
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
-use ssz::{ReadError, SszSize as _, WriteError};
+use ssz::{ReadError, SszSize as _, SszWrite as _, WriteError};
 use std::io;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString, IntoStaticStr};
 use tokio_io_timeout::TimeoutStream;
@@ -19,7 +19,17 @@ use tokio_util::{
     codec::Framed,
     compat::{Compat, FuturesAsyncReadCompatExt},
 };
-use types::{nonstandard::Phase, preset::Preset};
+use typenum::Unsigned as _;
+use types::{
+    altair::containers::{
+        LightClientBootstrap as AltairLightClientBootstrap,
+        LightClientFinalityUpdate as AltairLightClientFinalityUpdate,
+        LightClientOptimisticUpdate as AltairLightClientOptimisticUpdate,
+    },
+    eip7594::DataColumnSidecar,
+    nonstandard::Phase,
+    preset::{Mainnet, Preset},
+};
 
 pub const SIGNED_BEACON_BLOCK_PHASE0_MIN: usize = 404;
 pub const SIGNED_BEACON_BLOCK_PHASE0_MAX: usize = 157756;
@@ -33,11 +43,25 @@ pub const SIGNED_BEACON_BLOCK_ELECTRA_MAX: usize = 1125899911199676;
 pub const BLOB_SIDECAR_MIN: usize = 131928;
 pub const BLOB_SIDECAR_MAX: usize = 131928;
 
+static DATA_COLUMN_MIN: LazyLock<usize> = LazyLock::new(|| {
+    DataColumnSidecar::<Mainnet>::default()
+        .to_ssz()
+        .expect("default DataColumnSidecar must be available in SSZ")
+        .len()
+});
+static DATA_COLUMN_MAX: LazyLock<usize> = LazyLock::new(|| {
+    DataColumnSidecar::<Mainnet>::full()
+        .to_ssz()
+        .expect("default DataColumnSidecar must be available in SSZ")
+        .len()
+});
+
 pub const BLOBS_BY_ROOT_REQUEST_MIN: usize = 0;
 pub const BLOBS_BY_ROOT_REQUEST_MAX: usize = 24576;
 
 pub const BLOCKS_BY_ROOT_REQUEST_MIN: usize = 0;
 pub const BLOCKS_BY_ROOT_REQUEST_MAX: usize = 32768;
+
 pub const ERROR_TYPE_MIN: usize = 0;
 pub const ERROR_TYPE_MAX: usize = 256;
 
@@ -92,6 +116,69 @@ pub fn rpc_block_limits_by_fork(current_fork: Phase) -> RpcLimits {
     }
 }
 
+fn rpc_light_client_finality_update_limits_by_fork<P: Preset>(current_fork: Phase) -> RpcLimits {
+    let altair_fixed_len = AltairLightClientFinalityUpdate::<Mainnet>::SIZE.get();
+
+    match &current_fork {
+        Phase::Phase0 => RpcLimits::new(0, 0),
+        Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
+        Phase::Capella => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+        Phase::Deneb => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+        Phase::Electra => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+    }
+}
+
+fn rpc_light_client_optimistic_update_limits_by_fork<P: Preset>(current_fork: Phase) -> RpcLimits {
+    let altair_fixed_len = AltairLightClientOptimisticUpdate::<Mainnet>::SIZE.get();
+
+    match &current_fork {
+        Phase::Phase0 => RpcLimits::new(0, 0),
+        Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
+        Phase::Capella => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+        Phase::Deneb => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+        Phase::Electra => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+    }
+}
+
+fn rpc_light_client_bootstrap_limits_by_fork<P: Preset>(current_fork: Phase) -> RpcLimits {
+    let altair_fixed_len = AltairLightClientBootstrap::<Mainnet>::SIZE.get();
+
+    match &current_fork {
+        Phase::Phase0 => RpcLimits::new(0, 0),
+        Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
+        Phase::Capella => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+        Phase::Deneb => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+        Phase::Electra => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+    }
+}
+
 /// Protocol names to be used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, AsRefStr, Display)]
 #[strum(serialize_all = "snake_case")]
@@ -112,6 +199,12 @@ pub enum Protocol {
     /// The `BlobsByRoot` protocol name.
     #[strum(serialize = "blob_sidecars_by_root")]
     BlobsByRoot,
+    /// The `DataColumnSidecarsByRoot` protocol name.
+    #[strum(serialize = "data_column_sidecars_by_root")]
+    DataColumnsByRoot,
+    /// The `DataColumnSidecarsByRange` protocol name.
+    #[strum(serialize = "data_column_sidecars_by_range")]
+    DataColumnsByRange,
     /// The `Ping` protocol name.
     Ping,
     /// The `MetaData` protocol name.
@@ -137,6 +230,8 @@ impl Protocol {
             Protocol::BlocksByRoot => Some(ResponseTermination::BlocksByRoot),
             Protocol::BlobsByRange => Some(ResponseTermination::BlobsByRange),
             Protocol::BlobsByRoot => Some(ResponseTermination::BlobsByRoot),
+            Protocol::DataColumnsByRoot => Some(ResponseTermination::DataColumnsByRoot),
+            Protocol::DataColumnsByRange => Some(ResponseTermination::DataColumnsByRange),
             Protocol::Ping => None,
             Protocol::MetaData => None,
             Protocol::LightClientBootstrap => None,
@@ -165,9 +260,12 @@ pub enum SupportedProtocol {
     BlocksByRootV2,
     BlobsByRangeV1,
     BlobsByRootV1,
+    DataColumnsByRootV1,
+    DataColumnsByRangeV1,
     PingV1,
     MetaDataV1,
     MetaDataV2,
+    MetaDataV3,
     LightClientBootstrapV1,
     LightClientOptimisticUpdateV1,
     LightClientFinalityUpdateV1,
@@ -184,9 +282,12 @@ impl SupportedProtocol {
             SupportedProtocol::BlocksByRootV2 => "2",
             SupportedProtocol::BlobsByRangeV1 => "1",
             SupportedProtocol::BlobsByRootV1 => "1",
+            SupportedProtocol::DataColumnsByRootV1 => "1",
+            SupportedProtocol::DataColumnsByRangeV1 => "1",
             SupportedProtocol::PingV1 => "1",
             SupportedProtocol::MetaDataV1 => "1",
             SupportedProtocol::MetaDataV2 => "2",
+            SupportedProtocol::MetaDataV3 => "3",
             SupportedProtocol::LightClientBootstrapV1 => "1",
             SupportedProtocol::LightClientOptimisticUpdateV1 => "1",
             SupportedProtocol::LightClientFinalityUpdateV1 => "1",
@@ -203,9 +304,12 @@ impl SupportedProtocol {
             SupportedProtocol::BlocksByRootV2 => Protocol::BlocksByRoot,
             SupportedProtocol::BlobsByRangeV1 => Protocol::BlobsByRange,
             SupportedProtocol::BlobsByRootV1 => Protocol::BlobsByRoot,
+            SupportedProtocol::DataColumnsByRootV1 => Protocol::DataColumnsByRoot,
+            SupportedProtocol::DataColumnsByRangeV1 => Protocol::DataColumnsByRange,
             SupportedProtocol::PingV1 => Protocol::Ping,
             SupportedProtocol::MetaDataV1 => Protocol::MetaData,
             SupportedProtocol::MetaDataV2 => Protocol::MetaData,
+            SupportedProtocol::MetaDataV3 => Protocol::MetaData,
             SupportedProtocol::LightClientBootstrapV1 => Protocol::LightClientBootstrap,
             SupportedProtocol::LightClientOptimisticUpdateV1 => {
                 Protocol::LightClientOptimisticUpdate
@@ -218,20 +322,38 @@ impl SupportedProtocol {
         let mut supported = vec![
             ProtocolId::new(Self::StatusV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::GoodbyeV1, Encoding::SSZSnappy),
-            // V2 variants have higher preference then V1
             ProtocolId::new(Self::BlocksByRangeV2, Encoding::SSZSnappy),
             ProtocolId::new(Self::BlocksByRangeV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::BlocksByRootV2, Encoding::SSZSnappy),
             ProtocolId::new(Self::BlocksByRootV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::PingV1, Encoding::SSZSnappy),
-            ProtocolId::new(Self::MetaDataV2, Encoding::SSZSnappy),
-            ProtocolId::new(Self::MetaDataV1, Encoding::SSZSnappy),
         ];
+        // metadata protocol negotiation, the `MetaDataV3` has higher preference.
+        if fork_context.is_eip7594_enabled() {
+            supported.extend_from_slice(&[
+                ProtocolId::new(Self::MetaDataV3, Encoding::SSZSnappy),
+                ProtocolId::new(Self::MetaDataV2, Encoding::SSZSnappy),
+                ProtocolId::new(Self::MetaDataV1, Encoding::SSZSnappy),
+            ])
+        } else {
+            supported.extend_from_slice(&[
+                ProtocolId::new(Self::MetaDataV2, Encoding::SSZSnappy),
+                ProtocolId::new(Self::MetaDataV1, Encoding::SSZSnappy),
+            ])
+        }
+
         if fork_context.fork_exists(Phase::Deneb) {
             supported.extend_from_slice(&[
-                ProtocolId::new(SupportedProtocol::BlobsByRootV1, Encoding::SSZSnappy),
-                ProtocolId::new(SupportedProtocol::BlobsByRangeV1, Encoding::SSZSnappy),
+                ProtocolId::new(Self::BlobsByRootV1, Encoding::SSZSnappy),
+                ProtocolId::new(Self::BlobsByRangeV1, Encoding::SSZSnappy),
             ]);
+        }
+
+        if fork_context.is_eip7594_enabled() {
+            supported.extend_from_slice(&[
+                ProtocolId::new(Self::DataColumnsByRootV1, Encoding::SSZSnappy),
+                ProtocolId::new(Self::DataColumnsByRangeV1, Encoding::SSZSnappy),
+            ])
         }
         supported
     }
@@ -340,6 +462,11 @@ impl ProtocolId {
                 BlobsByRangeRequest::SIZE.get(),
                 BlobsByRangeRequest::SIZE.get(),
             ),
+            Protocol::DataColumnsByRoot => RpcLimits::new(0, MaxRequestDataColumnSidecars::USIZE),
+            Protocol::DataColumnsByRange => RpcLimits::new(
+                DataColumnsByRangeRequest::ssz_min_len(),
+                DataColumnsByRangeRequest::ssz_max_len(),
+            ),
             Protocol::BlobsByRoot => {
                 RpcLimits::new(BLOBS_BY_ROOT_REQUEST_MIN, BLOBS_BY_ROOT_REQUEST_MAX)
             }
@@ -365,14 +492,19 @@ impl ProtocolId {
             Protocol::BlocksByRoot => rpc_block_limits_by_fork(fork_context.current_fork()),
             Protocol::BlobsByRange => rpc_blob_limits::<P>(),
             Protocol::BlobsByRoot => rpc_blob_limits::<P>(),
+            Protocol::DataColumnsByRoot => rpc_data_column_limits::<P>(),
+            Protocol::DataColumnsByRange => rpc_data_column_limits::<P>(),
             Protocol::Ping => RpcLimits::new(Ping::SIZE.get(), Ping::SIZE.get()),
-            Protocol::MetaData => RpcLimits::new(MetaDataV1::SIZE.get(), MetaDataV2::SIZE.get()),
-            Protocol::LightClientBootstrap => RpcLimits::new(
-                LightClientBootstrapRequest::SIZE.get(),
-                LightClientBootstrapRequest::SIZE.get(),
-            ),
-            Protocol::LightClientOptimisticUpdate => RpcLimits::new(0, 0),
-            Protocol::LightClientFinalityUpdate => RpcLimits::new(0, 0),
+            Protocol::MetaData => RpcLimits::new(MetaDataV1::SIZE.get(), MetaDataV3::SIZE.get()),
+            Protocol::LightClientBootstrap => {
+                rpc_light_client_bootstrap_limits_by_fork::<P>(fork_context.current_fork())
+            }
+            Protocol::LightClientOptimisticUpdate => {
+                rpc_light_client_optimistic_update_limits_by_fork::<P>(fork_context.current_fork())
+            }
+            Protocol::LightClientFinalityUpdate => {
+                rpc_light_client_finality_update_limits_by_fork::<P>(fork_context.current_fork())
+            }
         }
     }
 
@@ -384,6 +516,8 @@ impl ProtocolId {
             | SupportedProtocol::BlocksByRootV2
             | SupportedProtocol::BlobsByRangeV1
             | SupportedProtocol::BlobsByRootV1
+            | SupportedProtocol::DataColumnsByRootV1
+            | SupportedProtocol::DataColumnsByRangeV1
             | SupportedProtocol::LightClientBootstrapV1
             | SupportedProtocol::LightClientOptimisticUpdateV1
             | SupportedProtocol::LightClientFinalityUpdateV1 => true,
@@ -393,6 +527,7 @@ impl ProtocolId {
             | SupportedProtocol::PingV1
             | SupportedProtocol::MetaDataV1
             | SupportedProtocol::MetaDataV2
+            | SupportedProtocol::MetaDataV3
             | SupportedProtocol::GoodbyeV1 => false,
         }
     }
@@ -463,6 +598,9 @@ where
                 SupportedProtocol::MetaDataV2 => {
                     Ok((InboundRequest::MetaData(MetadataRequest::new_v2()), socket))
                 }
+                SupportedProtocol::MetaDataV3 => {
+                    Ok((InboundRequest::MetaData(MetadataRequest::new_v3()), socket))
+                }
                 SupportedProtocol::LightClientOptimisticUpdateV1 => {
                     Ok((InboundRequest::LightClientOptimisticUpdate, socket))
                 }
@@ -496,6 +634,8 @@ pub enum InboundRequest<P: Preset> {
     BlocksByRoot(BlocksByRootRequest),
     BlobsByRange(BlobsByRangeRequest),
     BlobsByRoot(BlobsByRootRequest),
+    DataColumnsByRoot(DataColumnsByRootRequest),
+    DataColumnsByRange(DataColumnsByRangeRequest),
     LightClientBootstrap(LightClientBootstrapRequest),
     LightClientOptimisticUpdate,
     LightClientFinalityUpdate,
@@ -505,8 +645,6 @@ pub enum InboundRequest<P: Preset> {
 
 /// Implements the encoding per supported protocol for `RPCRequest`.
 impl<P: Preset> InboundRequest<P> {
-    /* These functions are used in the handler for stream management */
-
     /// Maximum number of responses expected for this request.
     pub fn max_responses(&self) -> u64 {
         match self {
@@ -519,6 +657,8 @@ impl<P: Preset> InboundRequest<P> {
             InboundRequest::LightClientBootstrap(_) => 1,
             InboundRequest::LightClientOptimisticUpdate => 1,
             InboundRequest::LightClientFinalityUpdate => 1,
+            InboundRequest::DataColumnsByRoot(req) => req.data_column_ids.len() as u64,
+            InboundRequest::DataColumnsByRange(req) => req.max_requested::<P>(),
             InboundRequest::Ping(_) => 1,
             InboundRequest::MetaData(_) => 1,
         }
@@ -539,10 +679,13 @@ impl<P: Preset> InboundRequest<P> {
             },
             InboundRequest::BlobsByRange(_) => SupportedProtocol::BlobsByRangeV1,
             InboundRequest::BlobsByRoot(_) => SupportedProtocol::BlobsByRootV1,
+            InboundRequest::DataColumnsByRoot(_) => SupportedProtocol::DataColumnsByRootV1,
+            InboundRequest::DataColumnsByRange(_) => SupportedProtocol::DataColumnsByRangeV1,
             InboundRequest::Ping(_) => SupportedProtocol::PingV1,
             InboundRequest::MetaData(req) => match req {
                 MetadataRequest::V1(_) => SupportedProtocol::MetaDataV1,
                 MetadataRequest::V2(_) => SupportedProtocol::MetaDataV2,
+                MetadataRequest::V3(_) => SupportedProtocol::MetaDataV3,
             },
             InboundRequest::LightClientBootstrap(_) => SupportedProtocol::LightClientBootstrapV1,
             InboundRequest::LightClientOptimisticUpdate => {
@@ -564,6 +707,8 @@ impl<P: Preset> InboundRequest<P> {
             InboundRequest::BlocksByRoot(_) => ResponseTermination::BlocksByRoot,
             InboundRequest::BlobsByRange(_) => ResponseTermination::BlobsByRange,
             InboundRequest::BlobsByRoot(_) => ResponseTermination::BlobsByRoot,
+            InboundRequest::DataColumnsByRoot(_) => ResponseTermination::DataColumnsByRoot,
+            InboundRequest::DataColumnsByRange(_) => ResponseTermination::DataColumnsByRange,
             InboundRequest::Status(_) => unreachable!(),
             InboundRequest::Goodbye(_) => unreachable!(),
             InboundRequest::Ping(_) => unreachable!(),
@@ -664,6 +809,10 @@ pub fn rpc_blob_limits<P: Preset>() -> RpcLimits {
     RpcLimits::new(BLOB_SIDECAR_MIN, BLOB_SIDECAR_MAX)
 }
 
+pub fn rpc_data_column_limits<P: Preset>() -> RpcLimits {
+    RpcLimits::new(*DATA_COLUMN_MIN, *DATA_COLUMN_MAX)
+}
+
 impl<P: Preset> std::fmt::Display for InboundRequest<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -673,10 +822,14 @@ impl<P: Preset> std::fmt::Display for InboundRequest<P> {
             InboundRequest::BlocksByRoot(req) => write!(f, "Blocks by root: {:?}", req),
             InboundRequest::BlobsByRange(req) => write!(f, "Blobs by range: {:?}", req),
             InboundRequest::BlobsByRoot(req) => write!(f, "Blobs by root: {:?}", req),
+            InboundRequest::DataColumnsByRoot(req) => write!(f, "Data columns by root: {:?}", req),
+            InboundRequest::DataColumnsByRange(req) => {
+                write!(f, "Data columns by range: {:?}", req)
+            }
             InboundRequest::Ping(ping) => write!(f, "Ping: {}", ping.data),
             InboundRequest::MetaData(_) => write!(f, "MetaData request"),
             InboundRequest::LightClientBootstrap(bootstrap) => {
-                write!(f, "LightClientBootstrap: {}", bootstrap.root)
+                write!(f, "Light client boostrap: {}", bootstrap.root)
             }
             InboundRequest::LightClientOptimisticUpdate => {
                 write!(f, "Light client optimistic update request")

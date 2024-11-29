@@ -20,7 +20,7 @@ use types::{
         SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebBeaconBlock},
-    eip7594::DataColumnSidecar,
+    eip7594::{DataColumnSidecar, DataColumnSubnetId},
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof,
@@ -46,7 +46,7 @@ pub enum PubsubMessage<P: Preset> {
     /// Gossipsub message providing notification of a [`BlobSidecar`] along with the subnet id where it was received.
     BlobSidecar(Box<(SubnetId, Arc<BlobSidecar<P>>)>),
     /// Gossipsub message providing notification of a [`DataColumnSidecar`] along with the subnet id where it was received.
-    DataColumnSidecar(Box<(SubnetId, Arc<DataColumnSidecar<P>>)>),
+    DataColumnSidecar(Box<(DataColumnSubnetId, Arc<DataColumnSidecar<P>>)>),
     /// Gossipsub message providing notification of a Aggregate attestation and associated proof.
     AggregateAndProofAttestation(Arc<SignedAggregateAndProof<P>>),
     /// Gossipsub message providing notification of a raw un-aggregated attestation with its shard id.
@@ -294,7 +294,6 @@ impl<P: Preset> PubsubMessage<P> {
                     }
                     GossipKind::DataColumnSidecar(subnet_id) => {
                         match fork_context.from_context_bytes(gossip_topic.fork_digest) {
-                            // TODO(das): Remove Deneb fork
                             Some(fork) if *fork >= Phase::Deneb => {
                                 let col_sidecar = Arc::new(
                                     DataColumnSidecar::from_ssz_default(data)
@@ -545,11 +544,19 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
             PubsubMessage::VoluntaryExit(_data) => write!(f, "Voluntary Exit"),
             PubsubMessage::ProposerSlashing(_data) => write!(f, "Proposer Slashing"),
             PubsubMessage::AttesterSlashing(_data) => write!(f, "Attester Slashing"),
-            PubsubMessage::SignedContributionAndProof(_) => {
-                write!(f, "Signed Contribution and Proof")
+            PubsubMessage::SignedContributionAndProof(data) => {
+                write!(
+                    f,
+                    "Signed Contribution and Proof: aggregator_index: {}",
+                    data.message.aggregator_index
+                )
             }
             PubsubMessage::SyncCommitteeMessage(data) => {
-                write!(f, "Sync committee message: subnet_id: {}", data.0)
+                write!(
+                    f,
+                    "Sync committee message: subnet_id: {}, validator_index: {}",
+                    data.0, data.1.validator_index
+                )
             }
             PubsubMessage::BlsToExecutionChange(data) => {
                 write!(

@@ -10,9 +10,11 @@ pub mod enr_ext;
 // Allow external use of the ENR builder
 use crate::{metrics, ClearDialError};
 use crate::{Enr, NetworkConfig, NetworkGlobals, Subnet, SubnetDiscovery};
+use bytes::Bytes;
 use discv5::{enr::NodeId, Discv5};
 pub use enr::{build_enr, load_enr_from_disk, use_or_load_enr, CombinedKey, Eth2Enr};
 pub use enr_ext::{peer_id_to_node_id, CombinedKeyExt, EnrExt};
+use libp2p::core::transport::PortUse;
 pub use libp2p::identity::{Keypair, PublicKey};
 
 use anyhow::{anyhow, Error, Result};
@@ -512,9 +514,11 @@ impl Discovery {
                 current_bitfield.set(id, value);
 
                 // insert the bitfield into the ENR record
-                let bitfield_ssz = current_bitfield.to_ssz()?;
                 self.discv5
-                    .enr_insert(ATTESTATION_BITFIELD_ENR_KEY, &bitfield_ssz.as_slice())
+                    .enr_insert::<Bytes>(
+                        ATTESTATION_BITFIELD_ENR_KEY,
+                        &current_bitfield.to_ssz()?.into(),
+                    )
                     .map_err(|e| anyhow!("{:?}", e))?;
             }
             Subnet::SyncCommittee(id) => {
@@ -536,9 +540,11 @@ impl Discovery {
                 current_bitfield.set(id, value);
 
                 // insert the bitfield into the ENR record
-                let bitfield_ssz = current_bitfield.to_ssz()?;
                 self.discv5
-                    .enr_insert(SYNC_COMMITTEE_BITFIELD_ENR_KEY, &bitfield_ssz.as_slice())
+                    .enr_insert::<Bytes>(
+                        SYNC_COMMITTEE_BITFIELD_ENR_KEY,
+                        &current_bitfield.to_ssz()?.into(),
+                    )
                     .map_err(|e| anyhow!("{:?}", e))?;
             }
             // Data column subnets are computed from node ID. No subnet bitfield in the ENR.
@@ -556,8 +562,8 @@ impl Discovery {
     /// Updates the `eth2` field of our local ENR.
     pub fn update_eth2_enr(&mut self, enr_fork_id: EnrForkId) {
         // to avoid having a reference to the spec constant, for the logging we assume
-        // FAR_FUTURE_EPOCH is u64::max_value()
-        let next_fork_epoch_log = if enr_fork_id.next_fork_epoch == u64::max_value() {
+        // FAR_FUTURE_EPOCH is u64::MAX
+        let next_fork_epoch_log = if enr_fork_id.next_fork_epoch == u64::MAX {
             String::from("No other fork")
         } else {
             format!("{:?}", enr_fork_id.next_fork_epoch)
@@ -570,9 +576,8 @@ impl Discovery {
         );
 
         let update = || {
-            let ssz = enr_fork_id.to_ssz()?;
             self.discv5
-                .enr_insert(ETH2_ENR_KEY, &ssz.as_slice())
+                .enr_insert::<Bytes>(ETH2_ENR_KEY, &enr_fork_id.to_ssz()?.into())
                 .map_err(|error| anyhow!("{:?}", error))
         };
 
@@ -980,6 +985,7 @@ impl NetworkBehaviour for Discovery {
         _peer: PeerId,
         _addr: &Multiaddr,
         _role_override: libp2p::core::Endpoint,
+        _port_use: PortUse,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
         Ok(ConnectionHandler)
     }
@@ -1067,10 +1073,7 @@ impl NetworkBehaviour for Discovery {
                             // NOTE: We assume libp2p itself can keep track of IP changes and we do
                             // not inform it about IP changes found via discovery.
                         }
-                        discv5::Event::EnrAdded { .. }
-                        | discv5::Event::TalkRequest(_)
-                        | discv5::Event::NodeInserted { .. }
-                        | discv5::Event::SessionEstablished { .. } => {} // Ignore all other discv5 server events
+                        _ => {} // Ignore all other discv5 server events
                     }
                 }
             }
@@ -1191,11 +1194,12 @@ impl Discovery {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{
-        rpc::methods::{MetaData, MetaDataV2},
+        rpc::{MetaData, MetaDataV2},
         types::EnrAttestationBitfield,
     };
+
+    use super::*;
     use libp2p::identity::secp256k1;
     use slog::{o, Drain};
 
@@ -1230,6 +1234,7 @@ mod tests {
             false,
             3,
             &log,
+            chain_config.clone(),
         );
         let keypair = keypair.into();
         Discovery::new(chain_config, keypair, &config, Arc::new(globals), &log)
@@ -1289,7 +1294,7 @@ mod tests {
 
         let bitfield_ssz = bitfield.to_ssz().unwrap();
 
-        builder.add_value(ATTESTATION_BITFIELD_ENR_KEY, &bitfield_ssz.as_slice());
+        builder.add_value::<Bytes>(ATTESTATION_BITFIELD_ENR_KEY, &bitfield_ssz.into());
         builder.build(&enr_key).unwrap()
     }
 

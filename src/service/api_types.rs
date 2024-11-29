@@ -7,10 +7,13 @@ use types::{
         SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
+    eip7594::DataColumnSidecar,
     preset::Preset,
 };
 
-use crate::rpc::methods::{BlobsByRangeRequest, BlobsByRootRequest};
+use crate::rpc::methods::{
+    BlobsByRangeRequest, BlobsByRootRequest, DataColumnsByRangeRequest, DataColumnsByRootRequest,
+};
 use crate::rpc::{
     methods::{
         BlocksByRangeRequest, BlocksByRootRequest, LightClientBootstrapRequest,
@@ -53,6 +56,10 @@ pub enum Request {
     LightClientFinalityUpdate,
     /// A request blobs root request.
     BlobsByRoot(BlobsByRootRequest),
+    /// A request data columns root request.
+    DataColumnsByRoot(DataColumnsByRootRequest),
+    /// A request data columns by range request.
+    DataColumnsByRange(DataColumnsByRangeRequest),
 }
 
 impl<P: Preset> std::convert::From<Request> for OutboundRequest<P> {
@@ -82,6 +89,8 @@ impl<P: Preset> std::convert::From<Request> for OutboundRequest<P> {
             }
             Request::BlobsByRange(r) => OutboundRequest::BlobsByRange(r),
             Request::BlobsByRoot(r) => OutboundRequest::BlobsByRoot(r),
+            Request::DataColumnsByRange(r) => OutboundRequest::DataColumnsByRange(r),
+            Request::DataColumnsByRoot(r) => OutboundRequest::DataColumnsByRoot(r),
             Request::Status(s) => OutboundRequest::Status(s),
         }
     }
@@ -101,10 +110,14 @@ pub enum Response<P: Preset> {
     BlocksByRange(Option<Arc<SignedBeaconBlock<P>>>),
     /// A response to a get BLOBS_BY_RANGE request. A None response signals the end of the batch.
     BlobsByRange(Option<Arc<BlobSidecar<P>>>),
+    /// A response to a get DATA_COLUMN_SIDECARS_BY_Range request.
+    DataColumnsByRange(Option<Arc<DataColumnSidecar<P>>>),
     /// A response to a get BLOCKS_BY_ROOT request.
     BlocksByRoot(Option<Arc<SignedBeaconBlock<P>>>),
     /// A response to a get BLOBS_BY_ROOT request.
     BlobsByRoot(Option<Arc<BlobSidecar<P>>>),
+    /// A response to a get DATA_COLUMN_SIDECARS_BY_ROOT request.
+    DataColumnsByRoot(Option<Arc<DataColumnSidecar<P>>>),
     /// A response to a LightClientUpdate request.
     LightClientBootstrap(Arc<LightClientBootstrap<P>>),
     /// A response to a LightClientOptimisticUpdate request.
@@ -131,6 +144,16 @@ impl<P: Preset> std::convert::From<Response<P>> for RPCCodedResponse<P> {
             Response::BlobsByRange(r) => match r {
                 Some(b) => RPCCodedResponse::Success(RPCResponse::BlobsByRange(b)),
                 None => RPCCodedResponse::StreamTermination(ResponseTermination::BlobsByRange),
+            },
+            Response::DataColumnsByRoot(r) => match r {
+                Some(d) => RPCCodedResponse::Success(RPCResponse::DataColumnsByRoot(d)),
+                None => RPCCodedResponse::StreamTermination(ResponseTermination::DataColumnsByRoot),
+            },
+            Response::DataColumnsByRange(r) => match r {
+                Some(d) => RPCCodedResponse::Success(RPCResponse::DataColumnsByRange(d)),
+                None => {
+                    RPCCodedResponse::StreamTermination(ResponseTermination::DataColumnsByRange)
+                }
             },
             Response::Status(s) => RPCCodedResponse::Success(RPCResponse::Status(s)),
             Response::LightClientBootstrap(b) => {

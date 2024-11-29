@@ -13,6 +13,8 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::time::Instant;
 use strum::AsRefStr;
+use types::eip7594::DataColumnSubnetId;
+use types::phase0::primitives::SubnetId;
 use PeerConnectionStatus::*;
 
 /// Information about a given connected peer.
@@ -38,6 +40,11 @@ pub struct PeerInfo {
     meta_data: Option<MetaData>,
     /// Subnets the peer is connected to.
     subnets: HashSet<Subnet>,
+    /// This is computed from either metadata or the ENR, and contains the subnets that the peer
+    /// is *assigned* to custody, rather than *connected* to (different to `self.subnets`).
+    /// Note: Another reason to keep this separate to `self.subnets` is an upcoming change to
+    /// decouple custody requirements from the actual subnets, i.e. changing this to `custody_groups`.
+    custody_subnets: HashSet<DataColumnSubnetId>,
     /// The time we would like to retain this peer. After this time, the peer is no longer
     /// necessary.
     #[serde(skip)]
@@ -60,6 +67,7 @@ impl Default for PeerInfo {
             listening_addresses: Vec::new(),
             seen_multiaddrs: HashSet::new(),
             subnets: HashSet::new(),
+            custody_subnets: HashSet::new(),
             sync_status: SyncStatus::Unknown,
             meta_data: None,
             min_ttl: None,
@@ -92,15 +100,7 @@ impl PeerInfo {
                         .syncnets()
                         .map_or(false, |s| s.get(*id as usize).unwrap_or(false))
                 }
-                Subnet::DataColumn(_) => {
-                    // TODO(das): Pending spec PR https://github.com/ethereum/consensus-specs/pull/3821
-                    // We should use MetaDataV3 for peer selection rather than
-                    // looking at subscribed peers (current behavior). Until MetaDataV3 is
-                    // implemented, this is the perhaps the only viable option on the current devnet
-                    // as the peer count is low and it's important to identify supernodes to get a
-                    // good distribution of peers across subnets.
-                    return true;
-                }
+                Subnet::DataColumn(subnet_id) => return self.custody_subnets.contains(subnet_id),
             }
         }
         false
@@ -206,6 +206,11 @@ impl PeerInfo {
     /// Returns if the peer is subscribed to a given `Subnet` from the gossipsub subscriptions.
     pub fn on_subnet_gossipsub(&self, subnet: &Subnet) -> bool {
         self.subnets.contains(subnet)
+    }
+
+    /// Returns if the peer is assigned to a given `SubnetId`.
+    pub fn is_assigned_to_custody_subnet(&self, subnet_id: &SubnetId) -> bool {
+        self.custody_subnets.contains(subnet_id)
     }
 
     /// Returns true if the peer is connected to a long-lived subnet.
@@ -358,6 +363,13 @@ impl PeerInfo {
     /// Sets the connection status of the peer.
     pub(super) fn set_connection_status(&mut self, connection_status: PeerConnectionStatus) {
         self.connection_status = connection_status
+    }
+
+    pub(in crate::peer_manager) fn set_custody_subnets(
+        &mut self,
+        custody_subnets: HashSet<DataColumnSubnetId>,
+    ) {
+        self.custody_subnets = custody_subnets
     }
 
     /// Sets the ENR of the peer if one is known.

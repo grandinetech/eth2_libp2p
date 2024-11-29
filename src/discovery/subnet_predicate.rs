@@ -1,6 +1,6 @@
 //! The subnet predicate used for searching for a particular subnet.
 use super::*;
-use eip_7594::get_custody_columns;
+use itertools::Itertools;
 use slog::trace;
 use ssz::Uint256;
 use std::sync::Arc;
@@ -23,9 +23,6 @@ pub fn subnet_predicate(
         // Don't return early here.
         let sync_committee_bitfield = enr.sync_committee_bitfield().ok();
 
-        // TODO(das): compute from enr
-        let custody_subnet_count = chain_config.custody_requirement;
-
         let predicate = subnets.iter().copied().any(|subnet| match subnet {
             Subnet::Attestation(subnet_id) => attestation_bitfield
                 .get(subnet_id as usize)
@@ -33,13 +30,17 @@ pub fn subnet_predicate(
             Subnet::SyncCommittee(subnet_id) => sync_committee_bitfield
                 .and_then(|bitfield| bitfield.get(subnet_id as usize))
                 .unwrap_or_default(),
-            Subnet::DataColumn(s) => {
-                let subnets = get_custody_columns(
-                    Uint256::from_be_bytes(enr.node_id().raw()),
-                    custody_subnet_count,
-                );
-                subnets.contains(&s)
-            }
+            Subnet::DataColumn(s) => enr
+                .custody_subnet_count(&chain_config)
+                .map_or(false, |csc| {
+                    let mut subnets = eip_7594::get_custody_subnets(
+                        Uint256::from_be_bytes(enr.node_id().raw()),
+                        csc,
+                        &chain_config,
+                    );
+
+                    subnets.contains(&s)
+                }),
         });
 
         if !predicate {

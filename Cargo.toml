@@ -19,6 +19,7 @@ discv5 = { workspace = true }
 either = { workspace = true }
 eip_7594 = { workspace = true }
 enum-iterator = { workspace = true }
+ethereum-types = { workspace = true }
 fnv = { workspace = true }
 futures = { workspace = true }
 futures-timer = { workspace = true }
@@ -26,6 +27,8 @@ gossipsub = { workspace = true }
 grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 hex = { workspace = true }
+hex_fmt = { workspace = true }
+itertools = { workspace = true }
 libp2p = { workspace = true }
 libp2p-mplex = { workspace = true }
 lru = { workspace = true }

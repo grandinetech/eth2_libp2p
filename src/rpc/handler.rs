@@ -397,11 +397,10 @@ where
                 // the delay has been removed
                 info.delay_key = None;
                 self.events_out.push(HandlerEvent::Err(HandlerErr::Inbound {
-                    error: RPCError::StreamTimeout,
-                    proto: info.protocol,
                     id: *inbound_id.get_ref(),
+                    proto: info.protocol,
+                    error: RPCError::StreamTimeout,
                 }));
-
                 if info.pending_items.back().map(|l| l.close_after()) == Some(false) {
                     // if the last chunk does not close the stream, append an error
                     info.pending_items.push_back(RPCCodedResponse::Error(
@@ -422,7 +421,7 @@ where
                     proto,
                     error: RPCError::StreamTimeout,
                 };
-                // notify the user
+                //notify the user
                 return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(HandlerEvent::Err(
                     outbound_err,
                 )));

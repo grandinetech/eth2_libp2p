@@ -51,7 +51,6 @@ pub enum Error {
 impl<Id: ReqId, P: Preset> SelfRateLimiter<Id, P> {
     /// Creates a new [`SelfRateLimiter`] based on configration values.
     pub fn new(config: OutboundRateLimiterConfig, log: Logger) -> Result<Self, &'static str> {
-        debug!(log, "Using self rate limiting params"; "config" => ?config);
         let limiter = RateLimiter::new_with_config(config.0)?;
 
         Ok(SelfRateLimiter {
@@ -158,9 +157,10 @@ impl<Id: ReqId, P: Preset> SelfRateLimiter<Id, P> {
                 entry.remove();
             }
         }
-        // NOTE: There can be entries that have been removed due to peer disconnections, we simply
-        // ignore these messages here.
     }
+
+    // NOTE: There can be entries that have been removed due to peer disconnections, we simply
+    // ignore these messages here.
 
     /// Informs the limiter that a peer has disconnected. This removes any pending requests and
     /// returns their IDs.
@@ -179,7 +179,7 @@ impl<Id: ReqId, P: Preset> SelfRateLimiter<Id, P> {
                     // Remove the entry
                     false
                 } else {
-                    // Keep the entry
+                    // keep the entry
                     true
                 }
             });

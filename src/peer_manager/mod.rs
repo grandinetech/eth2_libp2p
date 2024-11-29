@@ -2,6 +2,7 @@
 
 use crate::common::time_cache::LRUTimeCache;
 use crate::discovery::enr_ext::EnrExt;
+use crate::discovery::peer_id_to_node_id;
 use crate::rpc::{GoodbyeReason, MetaData, Protocol, RPCError, RPCResponseErrorCode};
 use crate::{metrics, Gossipsub};
 use crate::{NetworkGlobals, PeerId};
@@ -14,15 +15,17 @@ use peerdb::{BanOperation, BanResult, ScoreUpdateResult};
 use rand::seq::SliceRandom;
 use slog::{debug, error, trace, warn};
 use smallvec::SmallVec;
+use ssz::Uint256;
+use std::collections::HashSet;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use types::eip7594::DataColumnSubnetId;
 use types::phase0::primitives::SubnetId;
 
 pub use libp2p::core::Multiaddr;
 pub use libp2p::identity::Keypair;
-
 pub mod peerdb;
 
 use crate::peer_manager::peerdb::client::ClientKind;
@@ -339,15 +342,16 @@ impl PeerManager {
             {
                 // This should be updated with the peer dialing. In fact created once the peer is
                 // dialed
+                let peer_id = enr.peer_id();
                 if let Some(min_ttl) = min_ttl {
                     self.network_globals
                         .peers
                         .write()
-                        .update_min_ttl(&enr.peer_id(), min_ttl);
+                        .update_min_ttl(&peer_id, min_ttl);
                 }
                 let peer_id = enr.peer_id();
                 if self.dial_peer(enr) {
-                    debug!(self.log, "Dialing discovered peer"; "peer_id" => %peer_id);
+                    debug!(self.log, "Added discovered ENR peer to dial queue"; "peer_id" => %peer_id);
                     to_dial_peers += 1;
                 }
             }
@@ -448,18 +452,6 @@ impl PeerManager {
         self.network_globals.peers.read().is_connected(peer_id)
     }
 
-    /// Reports whether the peer limit is reached in which case we stop allowing new incoming
-    /// connections.
-    pub fn peer_limit_reached(&self, count_dialing: bool) -> bool {
-        if count_dialing {
-            // This is an incoming connection so limit by the standard max peers
-            self.network_globals.connected_or_dialing_peers() >= self.max_peers()
-        } else {
-            // We dialed this peer, allow up to max_outbound_dialing_peers
-            self.network_globals.connected_peers() >= self.max_outbound_dialing_peers()
-        }
-    }
-
     /// Updates `PeerInfo` with `identify` information.
     pub fn identify(&mut self, peer_id: &PeerId, info: &IdentifyInfo) {
         if let Some(peer_info) = self.network_globals.peers.write().peer_info_mut(peer_id) {
@@ -498,7 +490,7 @@ impl PeerManager {
         let score = self.network_globals.peers.read().score(peer_id);
         debug!(self.log, "RPC Error"; "protocol" => %protocol, "err" => %err, "client" => %client,
             "peer_id" => %peer_id, "score" => %score, "direction" => ?direction);
-        crate::common::metrics::inc_counter_vec(
+        metrics::inc_counter_vec(
             &metrics::TOTAL_RPC_ERRORS_PER_CLIENT,
             &[
                 client.kind.as_ref(),
@@ -530,7 +522,10 @@ impl PeerManager {
                 RPCResponseErrorCode::Unknown => PeerAction::HighToleranceError,
                 RPCResponseErrorCode::ResourceUnavailable => {
                     // Don't ban on this because we want to retry with a block by root request.
-                    if matches!(protocol, Protocol::BlobsByRoot) {
+                    if matches!(
+                        protocol,
+                        Protocol::BlobsByRoot | Protocol::DataColumnsByRoot
+                    ) {
                         return;
                     }
 
@@ -564,12 +559,14 @@ impl PeerManager {
                     Protocol::BlocksByRange => PeerAction::MidToleranceError,
                     Protocol::BlocksByRoot => PeerAction::MidToleranceError,
                     Protocol::BlobsByRange => PeerAction::MidToleranceError,
-                    // Grandine does not currently make light client requests; therefore, this
+                    // Lighthouse does not currently make light client requests; therefore, this
                     // is an unexpected scenario. We do not ban the peer for rate limiting.
                     Protocol::LightClientBootstrap => return,
                     Protocol::LightClientOptimisticUpdate => return,
                     Protocol::LightClientFinalityUpdate => return,
                     Protocol::BlobsByRoot => PeerAction::MidToleranceError,
+                    Protocol::DataColumnsByRoot => PeerAction::MidToleranceError,
+                    Protocol::DataColumnsByRange => PeerAction::MidToleranceError,
                     Protocol::Goodbye => PeerAction::LowToleranceError,
                     Protocol::MetaData => PeerAction::LowToleranceError,
                     Protocol::Status => PeerAction::LowToleranceError,
@@ -589,6 +586,8 @@ impl PeerManager {
                     Protocol::BlocksByRoot => return,
                     Protocol::BlobsByRange => return,
                     Protocol::BlobsByRoot => return,
+                    Protocol::DataColumnsByRoot => return,
+                    Protocol::DataColumnsByRange => return,
                     Protocol::Goodbye => return,
                     Protocol::LightClientBootstrap => return,
                     Protocol::LightClientOptimisticUpdate => return,
@@ -609,6 +608,8 @@ impl PeerManager {
                     Protocol::BlocksByRoot => PeerAction::MidToleranceError,
                     Protocol::BlobsByRange => PeerAction::MidToleranceError,
                     Protocol::BlobsByRoot => PeerAction::MidToleranceError,
+                    Protocol::DataColumnsByRoot => PeerAction::MidToleranceError,
+                    Protocol::DataColumnsByRange => PeerAction::MidToleranceError,
                     Protocol::LightClientBootstrap => return,
                     Protocol::LightClientOptimisticUpdate => return,
                     Protocol::LightClientFinalityUpdate => return,
@@ -693,6 +694,8 @@ impl PeerManager {
 
     /// Received a metadata response from a peer.
     pub fn meta_data_response(&mut self, peer_id: &PeerId, meta_data: MetaData) {
+        // let mut invalid_meta_data = false;
+
         if let Some(peer_info) = self.network_globals.peers.write().peer_info_mut(peer_id) {
             if let Some(known_meta_data) = &peer_info.meta_data() {
                 if known_meta_data.seq_number() < meta_data.seq_number() {
@@ -710,10 +713,34 @@ impl PeerManager {
                     "peer_id" => %peer_id, "new_seq_no" => meta_data.seq_number());
             }
             peer_info.set_meta_data(meta_data);
+
+            if self.network_globals.config.is_eip7594_enabled() {
+                // Gracefully ignore metadata/v2 peers. Potentially downscore after PeerDAS to
+                // prioritize PeerDAS peers.
+                if let Some(custody_subnet_count) = meta_data.custody_subnet_count() {
+                    match self.compute_peer_custody_subnets(peer_id, custody_subnet_count) {
+                        Ok(custody_subnets) => peer_info.set_custody_subnets(custody_subnets),
+                        Err(err) => {
+                            debug!(self.log, "Unable to compute peer custody subnets from metadata";
+                                // "info" => "Sending goodbye to peer",
+                                "peer_id" => %peer_id,
+                                "custody_subnet_count" => custody_subnet_count,
+                                "error" => ?err,
+                            );
+                            // invalid_meta_data = true;
+                        }
+                    }
+                }
+            }
         } else {
             error!(self.log, "Received METADATA from an unknown peer";
                 "peer_id" => %peer_id);
         }
+
+        // Disconnect peers with invalid metadata and find other peers instead.
+        // if invalid_meta_data {
+        //     self.goodbye_peer(peer_id, GoodbyeReason::Fault, ReportSource::PeerManager)
+        // }
     }
 
     /// Updates the gossipsub scores for all known peers in gossipsub.
@@ -1337,6 +1364,30 @@ impl PeerManager {
             }
         }
     }
+
+    fn compute_peer_custody_subnets(
+        &self,
+        peer_id: &PeerId,
+        custody_subnet_count: u64,
+    ) -> Result<HashSet<DataColumnSubnetId>, String> {
+        let node_id = peer_id_to_node_id(peer_id)?;
+        let config = &self.network_globals.config;
+
+        if custody_subnet_count > config.data_column_sidecar_subnet_count()
+            || custody_subnet_count < config.custody_requirement()
+        {
+            return Err("Invalid custody subnet count in metadata: out of range".to_string());
+        }
+
+        let custody_subnets = eip_7594::get_custody_subnets(
+            Uint256::from_be_bytes(node_id.raw()),
+            custody_subnet_count,
+            config,
+        )
+        .collect::<HashSet<_>>();
+
+        Ok(custody_subnets)
+    }
 }
 
 enum ConnectingType {
@@ -1358,6 +1409,7 @@ enum ConnectingType {
 mod tests {
     use super::*;
     use slog::{o, Drain};
+    use std::sync::Arc;
 
     pub fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
         let decorator = slog_term::TermDecorator::new().build();
@@ -1377,8 +1429,14 @@ mod tests {
             discovery_enabled: false,
             ..Default::default()
         };
+        let chain_config = Arc::new(types::config::Config::default());
         let log = build_log(slog::Level::Debug, false);
-        let globals = NetworkGlobals::new_test_globals(vec![], &log);
+        let globals = NetworkGlobals::new_test_globals(
+            vec![],
+            chain_config.custody_requirement,
+            &log,
+            &chain_config,
+        );
         PeerManager::new(config, Arc::new(globals), &log).unwrap()
     }
 
@@ -1391,8 +1449,14 @@ mod tests {
             discovery_enabled: false,
             ..Default::default()
         };
+        let chain_config = Arc::new(types::config::Config::default());
         let log = build_log(slog::Level::Debug, false);
-        let globals = NetworkGlobals::new_test_globals(trusted_peers, &log);
+        let globals = NetworkGlobals::new_test_globals(
+            trusted_peers,
+            chain_config.data_column_sidecar_subnet_count,
+            &log,
+            &chain_config,
+        );
         PeerManager::new(config, Arc::new(globals), &log).unwrap()
     }
 
@@ -2291,6 +2355,7 @@ mod tests {
                 .iter()
                 .filter_map(|p| if p.trusted { Some(p.peer_id) } else { None })
                 .collect();
+
             // If we have a high percentage of trusted peers, it is very difficult to reason about
             // the expected results of the pruning.
             if trusted_peers.len() > peer_conditions.len() / 3_usize {

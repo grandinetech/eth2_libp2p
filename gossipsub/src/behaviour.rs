@@ -35,7 +35,11 @@ use hashlink::LinkedHashMap;
 use prometheus_client::registry::Registry;
 use rand::{seq::SliceRandom, thread_rng};
 
-use libp2p::core::{multiaddr::Protocol::Ip4, multiaddr::Protocol::Ip6, Endpoint, Multiaddr};
+use libp2p::core::{
+    multiaddr::Protocol::{Ip4, Ip6},
+    transport::PortUse,
+    Endpoint, Multiaddr,
+};
 use libp2p::identity::Keypair;
 use libp2p::identity::PeerId;
 use libp2p::swarm::{
@@ -1720,6 +1724,7 @@ where
             );
             self.gossip_promises
                 .reject_message(msg_id, &RejectReason::BlackListedPeer);
+
             if let Some((peer_score, ..)) = &mut self.peer_score {
                 peer_score.reject_message(
                     propagation_source,
@@ -2712,7 +2717,7 @@ where
             };
 
             // Only gossipsub 1.2 peers support IDONTWANT.
-            if peer.kind != PeerKind::Gossipsubv1_2_beta {
+            if peer.kind != PeerKind::Gossipsubv1_2 {
                 continue;
             }
 
@@ -3161,6 +3166,7 @@ where
         peer_id: PeerId,
         _: &Multiaddr,
         _: Endpoint,
+        _: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         // By default we assume a peer is only a floodsub peer.
         //

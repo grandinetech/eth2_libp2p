@@ -37,6 +37,8 @@ pub enum OutboundRequest<P: Preset> {
     BlocksByRoot(BlocksByRootRequest),
     BlobsByRange(BlobsByRangeRequest),
     BlobsByRoot(BlobsByRootRequest),
+    DataColumnsByRange(DataColumnsByRangeRequest),
+    DataColumnsByRoot(DataColumnsByRootRequest),
     Ping(Ping),
     MetaData(MetadataRequest<P>),
 }
@@ -80,11 +82,20 @@ impl<P: Preset> OutboundRequest<P> {
                 SupportedProtocol::BlobsByRootV1,
                 Encoding::SSZSnappy,
             )],
+            OutboundRequest::DataColumnsByRoot(_) => vec![ProtocolId::new(
+                SupportedProtocol::DataColumnsByRootV1,
+                Encoding::SSZSnappy,
+            )],
+            OutboundRequest::DataColumnsByRange(_) => vec![ProtocolId::new(
+                SupportedProtocol::DataColumnsByRangeV1,
+                Encoding::SSZSnappy,
+            )],
             OutboundRequest::Ping(_) => vec![ProtocolId::new(
                 SupportedProtocol::PingV1,
                 Encoding::SSZSnappy,
             )],
             OutboundRequest::MetaData(_) => vec![
+                ProtocolId::new(SupportedProtocol::MetaDataV3, Encoding::SSZSnappy),
                 ProtocolId::new(SupportedProtocol::MetaDataV2, Encoding::SSZSnappy),
                 ProtocolId::new(SupportedProtocol::MetaDataV1, Encoding::SSZSnappy),
             ],
@@ -101,6 +112,8 @@ impl<P: Preset> OutboundRequest<P> {
             OutboundRequest::BlocksByRoot(req) => req.len() as u64,
             OutboundRequest::BlobsByRange(req) => req.max_blobs_requested::<P>(),
             OutboundRequest::BlobsByRoot(req) => req.blob_ids.len() as u64,
+            OutboundRequest::DataColumnsByRoot(req) => req.data_column_ids.len() as u64,
+            OutboundRequest::DataColumnsByRange(req) => req.max_requested::<P>(),
             OutboundRequest::Ping(_) => 1,
             OutboundRequest::MetaData(_) => 1,
         }
@@ -114,6 +127,8 @@ impl<P: Preset> OutboundRequest<P> {
             OutboundRequest::BlocksByRoot(_) => false,
             OutboundRequest::BlobsByRange(_) => false,
             OutboundRequest::BlobsByRoot(_) => false,
+            OutboundRequest::DataColumnsByRoot(_) => false,
+            OutboundRequest::DataColumnsByRange(_) => false,
             OutboundRequest::Ping(_) => true,
             OutboundRequest::MetaData(_) => true,
         }
@@ -134,10 +149,13 @@ impl<P: Preset> OutboundRequest<P> {
             },
             OutboundRequest::BlobsByRange(_) => SupportedProtocol::BlobsByRangeV1,
             OutboundRequest::BlobsByRoot(_) => SupportedProtocol::BlobsByRootV1,
+            OutboundRequest::DataColumnsByRoot(_) => SupportedProtocol::DataColumnsByRootV1,
+            OutboundRequest::DataColumnsByRange(_) => SupportedProtocol::DataColumnsByRangeV1,
             OutboundRequest::Ping(_) => SupportedProtocol::PingV1,
             OutboundRequest::MetaData(req) => match req {
                 MetadataRequest::V1(_) => SupportedProtocol::MetaDataV1,
                 MetadataRequest::V2(_) => SupportedProtocol::MetaDataV2,
+                MetadataRequest::V3(_) => SupportedProtocol::MetaDataV3,
             },
         }
     }
@@ -152,6 +170,8 @@ impl<P: Preset> OutboundRequest<P> {
             OutboundRequest::BlocksByRoot(_) => ResponseTermination::BlocksByRoot,
             OutboundRequest::BlobsByRange(_) => ResponseTermination::BlobsByRange,
             OutboundRequest::BlobsByRoot(_) => ResponseTermination::BlobsByRoot,
+            OutboundRequest::DataColumnsByRoot(_) => ResponseTermination::DataColumnsByRoot,
+            OutboundRequest::DataColumnsByRange(_) => ResponseTermination::DataColumnsByRange,
             OutboundRequest::Status(_) => unreachable!(),
             OutboundRequest::Goodbye(_) => unreachable!(),
             OutboundRequest::Ping(_) => unreachable!(),
@@ -209,6 +229,10 @@ impl<P: Preset> std::fmt::Display for OutboundRequest<P> {
             OutboundRequest::BlocksByRoot(req) => write!(f, "Blocks by root: {:?}", req),
             OutboundRequest::BlobsByRange(req) => write!(f, "Blobs by range: {:?}", req),
             OutboundRequest::BlobsByRoot(req) => write!(f, "Blobs by root: {:?}", req),
+            OutboundRequest::DataColumnsByRoot(req) => write!(f, "Data columns by root: {:?}", req),
+            OutboundRequest::DataColumnsByRange(req) => {
+                write!(f, "Data columns by range: {:?}", req)
+            }
             OutboundRequest::Ping(ping) => write!(f, "Ping: {}", ping.data),
             OutboundRequest::MetaData(_) => write!(f, "MetaData request"),
         }
