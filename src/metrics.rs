@@ -215,6 +215,20 @@ pub static TOTAL_SUBNET_QUERIES: LazyLock<Result<IntCounterVec>> = LazyLock::new
     )
 });
 
+pub static RPC_RECV_BYTES: LazyLock<Result<IntCounter>> = LazyLock::new(|| {
+    try_create_int_counter("rpc_recv_bytes", "The number of bytes received in RPC")
+});
+
+pub static RPC_SENT_BYTES: LazyLock<Result<IntCounter>> =
+    LazyLock::new(|| try_create_int_counter("rpc_sent_bytes", "The number of bytes sent in RPC"));
+
+pub static RPC_TOTAL_BYTES: LazyLock<Result<IntCounter>> = LazyLock::new(|| {
+    try_create_int_counter(
+        "rpc_total_bytes",
+        "The number of bytes sent and received in RPC",
+    )
+});
+
 /*
  * Peer Reporting
  */
