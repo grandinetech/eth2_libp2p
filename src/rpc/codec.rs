@@ -27,6 +27,7 @@ use types::{
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebSignedBeaconBlock},
     eip7594::DataColumnSidecar,
     electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
+    fulu::containers::SignedBeaconBlock as FuluSignedBeaconBlock,
     nonstandard::Phase,
     phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::ForkDigest},
     preset::Preset,
@@ -511,6 +512,9 @@ fn context_bytes<P: Preset>(
                     return match **ref_box_block {
                         // NOTE: If you are adding another fork type here, be sure to modify the
                         //       `fork_context.to_context_bytes()` function to support it as well!
+                        SignedBeaconBlock::Fulu { .. } => {
+                            fork_context.to_context_bytes(Phase::Fulu)
+                        }
                         SignedBeaconBlock::Electra { .. } => {
                             fork_context.to_context_bytes(Phase::Electra)
                         }
@@ -537,20 +541,13 @@ fn context_bytes<P: Preset>(
                 RpcSuccessResponse::BlobsByRange(_) | RpcSuccessResponse::BlobsByRoot(_) => {
                     return fork_context.to_context_bytes(Phase::Deneb);
                 }
-                RpcSuccessResponse::DataColumnsByRoot(d)
-                | RpcSuccessResponse::DataColumnsByRange(d) => {
-                    // TODO(das): Remove deneb fork after `peerdas-devnet-2`.
-                    return if matches!(
-                        fork_context.chain_config().phase_at_slot::<P>(d.slot()),
-                        Phase::Deneb
-                    ) {
-                        fork_context.to_context_bytes(Phase::Deneb)
-                    } else {
-                        fork_context.to_context_bytes(Phase::Electra)
-                    };
+                RpcSuccessResponse::DataColumnsByRoot(_)
+                | RpcSuccessResponse::DataColumnsByRange(_) => {
+                    return fork_context.to_context_bytes(Phase::Fulu);
                 }
                 RpcSuccessResponse::LightClientBootstrap(lc_bootstrap) => {
                     return match **lc_bootstrap {
+                        LightClientBootstrap::Fulu(_) => fork_context.to_context_bytes(Phase::Fulu),
                         LightClientBootstrap::Electra(_) => {
                             fork_context.to_context_bytes(Phase::Electra)
                         }
@@ -567,6 +564,9 @@ fn context_bytes<P: Preset>(
                 }
                 RpcSuccessResponse::LightClientOptimisticUpdate(lc_optimistic_update) => {
                     return match **lc_optimistic_update {
+                        LightClientOptimisticUpdate::Fulu(_) => {
+                            fork_context.to_context_bytes(Phase::Fulu)
+                        }
                         LightClientOptimisticUpdate::Electra(_) => {
                             fork_context.to_context_bytes(Phase::Electra)
                         }
@@ -583,6 +583,9 @@ fn context_bytes<P: Preset>(
                 }
                 RpcSuccessResponse::LightClientFinalityUpdate(lc_finality_update) => {
                     return match **lc_finality_update {
+                        LightClientFinalityUpdate::Fulu(_) => {
+                            fork_context.to_context_bytes(Phase::Fulu)
+                        }
                         LightClientFinalityUpdate::Electra(_) => {
                             fork_context.to_context_bytes(Phase::Electra)
                         }
@@ -599,6 +602,7 @@ fn context_bytes<P: Preset>(
                 }
                 RpcSuccessResponse::LightClientUpdatesByRange(lc_update) => {
                     return match **lc_update {
+                        LightClientUpdate::Fulu(_) => fork_context.to_context_bytes(Phase::Fulu),
                         LightClientUpdate::Electra(_) => {
                             fork_context.to_context_bytes(Phase::Electra)
                         }
@@ -826,12 +830,12 @@ fn handle_rpc_response<P: Preset>(
             Some(Phase::Deneb | Phase::Electra) => Ok(Some(RpcSuccessResponse::BlobsByRange(
                 Arc::new(BlobSidecar::from_ssz_default(decoded_buffer)?),
             ))),
-            Some(Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella) => {
-                Err(RPCError::ErrorResponse(
-                    RpcErrorResponse::InvalidRequest,
-                    "Invalid fork name for blobs by range".to_string(),
-                ))
-            }
+            Some(
+                Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Fulu,
+            ) => Err(RPCError::ErrorResponse(
+                RpcErrorResponse::InvalidRequest,
+                "Invalid fork name for blobs by range".to_string(),
+            )),
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -844,12 +848,12 @@ fn handle_rpc_response<P: Preset>(
             Some(Phase::Deneb | Phase::Electra) => Ok(Some(RpcSuccessResponse::BlobsByRoot(
                 Arc::new(BlobSidecar::from_ssz_default(decoded_buffer)?),
             ))),
-            Some(Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella) => {
-                Err(RPCError::ErrorResponse(
-                    RpcErrorResponse::InvalidRequest,
-                    "Invalid fork name for blobs by root".to_string(),
-                ))
-            }
+            Some(
+                Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Fulu,
+            ) => Err(RPCError::ErrorResponse(
+                RpcErrorResponse::InvalidRequest,
+                "Invalid fork name for blobs by root".to_string(),
+            )),
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -859,18 +863,20 @@ fn handle_rpc_response<P: Preset>(
             )),
         },
         SupportedProtocol::DataColumnsByRootV1 => match fork_name {
-            // TODO(das): PeerDAS is currently supported for both deneb and electra. This check
-            // does not advertise the topic on deneb, simply allows it to decode it. Advertise
-            // logic is in `SupportedTopic::currently_supported`.
-            Some(Phase::Deneb | Phase::Electra) => Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
-                Arc::new(DataColumnSidecar::from_ssz_default(decoded_buffer)?),
-            ))),
-            Some(Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella) => {
-                Err(RPCError::ErrorResponse(
-                    RpcErrorResponse::InvalidRequest,
-                    "Invalid fork name for data columns by root".to_string(),
-                ))
-            }
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::DataColumnsByRoot(Arc::new(
+                DataColumnSidecar::from_ssz_default(decoded_buffer)?,
+            )))),
+            Some(
+                Phase::Phase0
+                | Phase::Altair
+                | Phase::Bellatrix
+                | Phase::Capella
+                | Phase::Deneb
+                | Phase::Electra,
+            ) => Err(RPCError::ErrorResponse(
+                RpcErrorResponse::InvalidRequest,
+                "Invalid fork name for data columns by root".to_string(),
+            )),
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -880,17 +886,20 @@ fn handle_rpc_response<P: Preset>(
             )),
         },
         SupportedProtocol::DataColumnsByRangeV1 => match fork_name {
-            Some(Phase::Deneb | Phase::Electra) => {
-                Ok(Some(RpcSuccessResponse::DataColumnsByRange(Arc::new(
-                    DataColumnSidecar::from_ssz_default(decoded_buffer)?,
-                ))))
-            }
-            Some(Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella) => {
-                Err(RPCError::ErrorResponse(
-                    RpcErrorResponse::InvalidRequest,
-                    "Invalid fork name for data columns by range".to_string(),
-                ))
-            }
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::DataColumnsByRange(Arc::new(
+                DataColumnSidecar::from_ssz_default(decoded_buffer)?,
+            )))),
+            Some(
+                Phase::Phase0
+                | Phase::Altair
+                | Phase::Bellatrix
+                | Phase::Capella
+                | Phase::Deneb
+                | Phase::Electra,
+            ) => Err(RPCError::ErrorResponse(
+                RpcErrorResponse::InvalidRequest,
+                "Invalid fork name for data columns by range".to_string(),
+            )),
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -932,6 +941,11 @@ fn handle_rpc_response<P: Preset>(
                     .map(LightClientBootstrap::Electra)
                     .map(Arc::new)?,
             ))),
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::LightClientBootstrap(
+                SszReadDefault::from_ssz_default(decoded_buffer)
+                    .map(LightClientBootstrap::Fulu)
+                    .map(Arc::new)?,
+            ))),
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -969,6 +983,11 @@ fn handle_rpc_response<P: Preset>(
                     .map(LightClientOptimisticUpdate::Electra)
                     .map(Arc::new)?,
             ))),
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::LightClientOptimisticUpdate(
+                SszReadDefault::from_ssz_default(decoded_buffer)
+                    .map(LightClientOptimisticUpdate::Fulu)
+                    .map(Arc::new)?,
+            ))),
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -1004,6 +1023,11 @@ fn handle_rpc_response<P: Preset>(
                     .map(LightClientFinalityUpdate::Electra)
                     .map(Arc::new)?,
             ))),
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::LightClientFinalityUpdate(
+                SszReadDefault::from_ssz_default(decoded_buffer)
+                    .map(LightClientFinalityUpdate::Fulu)
+                    .map(Arc::new)?,
+            ))),
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -1037,6 +1061,11 @@ fn handle_rpc_response<P: Preset>(
             Some(Phase::Electra) => Ok(Some(RpcSuccessResponse::LightClientUpdatesByRange(
                 SszReadDefault::from_ssz_default(decoded_buffer)
                     .map(LightClientUpdate::Electra)
+                    .map(Arc::new)?,
+            ))),
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::LightClientUpdatesByRange(
+                SszReadDefault::from_ssz_default(decoded_buffer)
+                    .map(LightClientUpdate::Fulu)
                     .map(Arc::new)?,
             ))),
             None => Err(RPCError::ErrorResponse(
@@ -1083,6 +1112,9 @@ fn handle_rpc_response<P: Preset>(
                     decoded_buffer,
                 )?),
             )))),
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::BlocksByRange(Arc::new(
+                SignedBeaconBlock::Fulu(FuluSignedBeaconBlock::from_ssz_default(decoded_buffer)?),
+            )))),
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -1119,6 +1151,9 @@ fn handle_rpc_response<P: Preset>(
                 SignedBeaconBlock::Electra(ElectraSignedBeaconBlock::from_ssz_default(
                     decoded_buffer,
                 )?),
+            )))),
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::BlocksByRoot(Arc::new(
+                SignedBeaconBlock::Fulu(FuluSignedBeaconBlock::from_ssz_default(decoded_buffer)?),
             )))),
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
@@ -1639,6 +1674,16 @@ mod tests {
         assert_eq!(
             encode_then_decode_response::<Mainnet>(
                 &config,
+                SupportedProtocol::BlobsByRangeV1,
+                RpcResponse::Success(RpcSuccessResponse::BlobsByRange(empty_blob_sidecar())),
+                Phase::Fulu,
+            ),
+            Ok(Some(RpcSuccessResponse::BlobsByRange(empty_blob_sidecar()))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
                 SupportedProtocol::BlobsByRootV1,
                 RpcResponse::Success(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar())),
                 Phase::Deneb,
@@ -1652,6 +1697,16 @@ mod tests {
                 SupportedProtocol::BlobsByRootV1,
                 RpcResponse::Success(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar())),
                 Phase::Electra,
+            ),
+            Ok(Some(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar()))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::BlobsByRootV1,
+                RpcResponse::Success(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar())),
+                Phase::Fulu,
             ),
             Ok(Some(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar()))),
         );
@@ -1678,6 +1733,20 @@ mod tests {
                     empty_data_column_sidecar()
                 )),
                 Phase::Electra,
+            ),
+            Ok(Some(RpcSuccessResponse::DataColumnsByRange(
+                empty_data_column_sidecar()
+            ))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::DataColumnsByRangeV1,
+                RpcResponse::Success(RpcSuccessResponse::DataColumnsByRange(
+                    empty_data_column_sidecar()
+                )),
+                Phase::Fulu,
             ),
             Ok(Some(RpcSuccessResponse::DataColumnsByRange(
                 empty_data_column_sidecar()
@@ -1706,6 +1775,20 @@ mod tests {
                     empty_data_column_sidecar()
                 )),
                 Phase::Electra,
+            ),
+            Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
+                empty_data_column_sidecar()
+            ))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::DataColumnsByRootV1,
+                RpcResponse::Success(RpcSuccessResponse::DataColumnsByRoot(
+                    empty_data_column_sidecar()
+                )),
+                Phase::Fulu,
             ),
             Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
                 empty_data_column_sidecar()

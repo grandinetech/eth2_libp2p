@@ -35,6 +35,7 @@ pub fn subnet_predicate(
                     let subnets = get_custody_groups(
                         Uint256::from_be_bytes(enr.node_id().raw()),
                         custody_subnet_count,
+                        &chain_config,
                     );
 
                     subnets.contains(subnet_id)
