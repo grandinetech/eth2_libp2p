@@ -12,7 +12,7 @@ use discv5::Enr;
 use libp2p::identify::Info as IdentifyInfo;
 use peerdb::{BanOperation, BanResult, ScoreUpdateResult};
 use rand::seq::SliceRandom;
-use slog::{debug, error, trace, warn};
+use slog::{debug, error, info, trace, warn};
 use smallvec::SmallVec;
 use std::{
     sync::Arc,
@@ -459,7 +459,7 @@ impl PeerManager {
             if previous_kind != peer_info.client().kind
                 || *peer_info.listening_addresses() != previous_listening_addresses
             {
-                debug!(self.log, "Identified Peer"; "peer" => %peer_id,
+                info!(self.log, "Identified Peer"; "peer" => %peer_id,
                     "protocol_version" => &info.protocol_version,
                     "agent_version" => &info.agent_version,
                     "listening_addresses" => ?info.listen_addrs,
