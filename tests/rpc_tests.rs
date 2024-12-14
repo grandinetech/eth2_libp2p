@@ -334,10 +334,9 @@ async fn test_blobs_by_range_chunked_rpc() {
     .await;
 
     // BlobsByRange Request
-    let rpc_request = RequestType::BlobsByRange(BlobsByRangeRequest {
-        start_slot: 0,
-        count: slot_count,
-    });
+    let rpc_request = RequestType::BlobsByRange(
+        BlobsByRangeRequest::new_v1(0, slot_count)
+    );
 
     // BlocksByRange Response
     let blob = BlobSidecar::<Mainnet>::default();

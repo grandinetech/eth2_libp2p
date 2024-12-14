@@ -368,8 +368,11 @@ impl<P: Preset> Encoder<RequestType<P>> for SSZSnappyOutboundCodec<P> {
                 BlocksByRootRequest::V1(req) => req.block_roots.to_ssz()?,
                 BlocksByRootRequest::V2(req) => req.block_roots.to_ssz()?,
             },
-            RequestType::BlobsByRange(req) => req.to_ssz()?,
-            RequestType::BlobsByRoot(req) => req.blob_ids.to_ssz()?,
+            RequestType::BlobsByRange(r) => match r {
+                BlobsByRangeRequest::V1(req) => req.to_ssz()?,
+                BlobsByRangeRequest::V2(req) => req.to_ssz()?,
+            },
+            RequestType::BlobsByRoot(req) => req.blob_ids().to_ssz()?,
             RequestType::DataColumnsByRange(req) => req.to_ssz()?,
             RequestType::DataColumnsByRoot(req) => req.data_column_ids.to_ssz()?,
             RequestType::Ping(req) => req.to_ssz()?,
@@ -686,17 +689,28 @@ fn handle_rpc_request<P: Preset>(
                 )?,
             }),
         ))),
-        SupportedProtocol::BlobsByRangeV1 => Ok(Some(RequestType::BlobsByRange(
-            BlobsByRangeRequest::from_ssz_default(decoded_buffer)?,
+        SupportedProtocol::BlobsByRangeV2 => Ok(Some(RequestType::BlobsByRange(
+            BlobsByRangeRequest::V2(BlobsByRangeRequestV2::from_ssz_default(decoded_buffer)?),
         ))),
-        SupportedProtocol::BlobsByRootV1 => {
-            Ok(Some(RequestType::BlobsByRoot(BlobsByRootRequest {
+        SupportedProtocol::BlobsByRangeV1 => Ok(Some(RequestType::BlobsByRange(
+            BlobsByRangeRequest::V1(BlobsByRangeRequestV1::from_ssz_default(decoded_buffer)?),
+        ))),
+        SupportedProtocol::BlobsByRootV2 => Ok(Some(RequestType::BlobsByRoot(
+            BlobsByRootRequest::V2(BlobsByRootRequestV2 {
+                blob_ids: DynamicList::from_ssz(
+                    &(config.max_request_blob_sidecars_electra as usize),
+                    decoded_buffer,
+                )?,
+            })
+        ))),
+        SupportedProtocol::BlobsByRootV1 => Ok(Some(RequestType::BlobsByRoot(
+            BlobsByRootRequest::V1(BlobsByRootRequestV1 {
                 blob_ids: DynamicList::from_ssz(
                     &(config.max_request_blob_sidecars as usize),
                     decoded_buffer,
                 )?,
-            })))
-        }
+            })
+        ))),
         SupportedProtocol::DataColumnsByRangeV1 => Ok(Some(RequestType::DataColumnsByRange(
             DataColumnsByRangeRequest::from_ssz_default(decoded_buffer)?,
         ))),
@@ -784,7 +798,7 @@ fn handle_rpc_response<P: Preset>(
         SupportedProtocol::BlocksByRootV1 => Ok(Some(RpcSuccessResponse::BlocksByRoot(Arc::new(
             SignedBeaconBlock::Phase0(Phase0SignedBeaconBlock::from_ssz_default(decoded_buffer)?),
         )))),
-        SupportedProtocol::BlobsByRangeV1 => match fork_name {
+        SupportedProtocol::BlobsByRangeV1 | SupportedProtocol::BlobsByRangeV2 => match fork_name {
             Some(Phase::Deneb | Phase::Electra) => Ok(Some(RpcSuccessResponse::BlobsByRange(
                 Arc::new(BlobSidecar::from_ssz_default(decoded_buffer)?),
             ))),
@@ -802,7 +816,7 @@ fn handle_rpc_response<P: Preset>(
                 ),
             )),
         },
-        SupportedProtocol::BlobsByRootV1 => match fork_name {
+        SupportedProtocol::BlobsByRootV1 | SupportedProtocol::BlobsByRootV2 => match fork_name {
             Some(Phase::Deneb | Phase::Electra) => Ok(Some(RpcSuccessResponse::BlobsByRoot(
                 Arc::new(BlobSidecar::from_ssz_default(decoded_buffer)?),
             ))),
@@ -1259,11 +1273,12 @@ mod tests {
         OldBlocksByRangeRequest::new(0, 10, 1)
     }
 
-    fn blbrange_request() -> BlobsByRangeRequest {
-        BlobsByRangeRequest {
-            start_slot: 0,
-            count: 10,
-        }
+    fn blbrange_request_v1() -> BlobsByRangeRequest {
+        BlobsByRangeRequest::new_v1(0, 10)
+    }
+
+    fn blbrange_request_v2() -> BlobsByRangeRequest {
+        BlobsByRangeRequest::new(0, 10)
     }
 
     fn bbroot_request_v1(config: &Config, phase: Phase) -> BlocksByRootRequest {
@@ -1274,13 +1289,24 @@ mod tests {
         BlocksByRootRequest::new(config, phase, core::iter::once(H256::zero()))
     }
 
-    fn blbroot_request() -> BlobsByRootRequest {
-        BlobsByRootRequest {
-            blob_ids: DynamicList::single(BlobIdentifier {
+    fn blbroot_request_v1(config: &Config) -> BlobsByRootRequest {
+        BlobsByRootRequest::new_v1(
+            config,
+            core::iter::once(BlobIdentifier {
                 block_root: H256::zero(),
                 index: 0,
-            }),
-        }
+            })
+        )
+    }
+
+    fn blbroot_request_v2(config: &Config) -> BlobsByRootRequest {
+        BlobsByRootRequest::new(
+            config,
+            core::iter::once(BlobIdentifier {
+                block_root: H256::zero(),
+                index: 0,
+            })
+        )
     }
 
     fn ping_message() -> Ping {
@@ -1869,6 +1895,46 @@ mod tests {
             ),
             Ok(Some(RpcSuccessResponse::MetaData(metadata_v2())))
         );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::BlobsByRangeV2,
+                RpcResponse::Success(RpcSuccessResponse::BlobsByRange(empty_blob_sidecar())),
+                Phase::Deneb,
+            ),
+            Ok(Some(RpcSuccessResponse::BlobsByRange(empty_blob_sidecar()))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::BlobsByRangeV2,
+                RpcResponse::Success(RpcSuccessResponse::BlobsByRange(empty_blob_sidecar())),
+                Phase::Electra,
+            ),
+            Ok(Some(RpcSuccessResponse::BlobsByRange(empty_blob_sidecar()))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::BlobsByRootV2,
+                RpcResponse::Success(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar())),
+                Phase::Deneb,
+            ),
+            Ok(Some(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar()))),
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::BlobsByRootV2,
+                RpcResponse::Success(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar())),
+                Phase::Electra,
+            ),
+            Ok(Some(RpcSuccessResponse::BlobsByRoot(empty_blob_sidecar()))),
+        );
     }
 
     // Test RPCResponse encoding/decoding for V2 messages
@@ -2082,11 +2148,14 @@ mod tests {
             RequestType::BlocksByRoot(bbroot_request_v1(&config, Phase::Phase0)),
             RequestType::BlocksByRoot(bbroot_request_v2(&config, Phase::Phase0)),
             RequestType::MetaData(MetadataRequest::new_v1()),
-            RequestType::BlobsByRange(blbrange_request()),
-            RequestType::BlobsByRoot(blbroot_request()),
+            RequestType::BlobsByRange(blbrange_request_v1()),
+            RequestType::BlobsByRoot(blbroot_request_v1(&config)),
             RequestType::DataColumnsByRange(dcbrange_request()),
             RequestType::DataColumnsByRoot(dcbroot_request()),
             RequestType::MetaData(MetadataRequest::new_v2()),
+            RequestType::MetaData(MetadataRequest::new_v3()),
+            RequestType::BlobsByRange(blbrange_request_v2()),
+            RequestType::BlobsByRoot(blbroot_request_v2(&config)),
         ];
         for req in requests.iter() {
             for fork_name in enum_iterator::all::<Phase>() {
