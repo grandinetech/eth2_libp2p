@@ -715,7 +715,7 @@ impl PeerManager {
             let custody_subnet_count_opt = meta_data.custody_subnet_count();
             peer_info.set_meta_data(meta_data);
 
-            if self.network_globals.config.is_eip7594_fork_epoch_set() {
+            if self.network_globals.config.is_peerdas_scheduled() {
                 // Gracefully ignore metadata/v2 peers. Potentially downscore after PeerDAS to
                 // prioritize PeerDAS peers.
                 if let Some(custody_subnet_count) = custody_subnet_count_opt {
@@ -1399,7 +1399,7 @@ impl PeerManager {
             return Err("Invalid custody subnet count in metadata: out of range".to_string());
         }
 
-        let custody_subnets = compute_custody_subnets(node_id.raw(), custody_subnet_count)
+        let custody_subnets = compute_custody_subnets(node_id.raw(), custody_subnet_count, config)
             .map(|subnets| subnets.collect())
             .unwrap_or_else(|e| {
                 // This is an unreachable scenario unless there's a bug, as we've validated the csc

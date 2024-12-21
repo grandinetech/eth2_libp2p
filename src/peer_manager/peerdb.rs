@@ -730,10 +730,13 @@ impl PeerDB {
         } else {
             let peer_info = self.peers.get_mut(&peer_id).expect("peer exists");
             let node_id = peer_id_to_node_id(&peer_id).expect("convert peer_id to node_id");
-            let subnets =
-                compute_custody_subnets(node_id.raw(), self.chain_config.custody_requirement)
-                    .expect("should compute custody subnets")
-                    .collect();
+            let subnets = compute_custody_subnets(
+                node_id.raw(),
+                self.chain_config.custody_requirement,
+                &self.chain_config,
+            )
+            .expect("should compute custody subnets")
+            .collect();
             peer_info.set_custody_subnets(subnets);
         }
 

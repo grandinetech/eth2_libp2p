@@ -25,9 +25,8 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebSignedBeaconBlock},
-    eip7594::DataColumnSidecar,
     electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
-    fulu::containers::SignedBeaconBlock as FuluSignedBeaconBlock,
+    fulu::containers::{DataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock},
     nonstandard::Phase,
     phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::ForkDigest},
     preset::Preset,
@@ -827,15 +826,17 @@ fn handle_rpc_response<P: Preset>(
             SignedBeaconBlock::Phase0(Phase0SignedBeaconBlock::from_ssz_default(decoded_buffer)?),
         )))),
         SupportedProtocol::BlobsByRangeV1 => match fork_name {
-            Some(Phase::Deneb | Phase::Electra) => Ok(Some(RpcSuccessResponse::BlobsByRange(
-                Arc::new(BlobSidecar::from_ssz_default(decoded_buffer)?),
-            ))),
-            Some(
-                Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Fulu,
-            ) => Err(RPCError::ErrorResponse(
-                RpcErrorResponse::InvalidRequest,
-                "Invalid fork name for blobs by range".to_string(),
-            )),
+            Some(Phase::Deneb | Phase::Electra | Phase::Fulu) => {
+                Ok(Some(RpcSuccessResponse::BlobsByRange(Arc::new(
+                    BlobSidecar::from_ssz_default(decoded_buffer)?,
+                ))))
+            }
+            Some(Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella) => {
+                Err(RPCError::ErrorResponse(
+                    RpcErrorResponse::InvalidRequest,
+                    "Invalid fork name for blobs by range".to_string(),
+                ))
+            }
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -845,15 +846,17 @@ fn handle_rpc_response<P: Preset>(
             )),
         },
         SupportedProtocol::BlobsByRootV1 => match fork_name {
-            Some(Phase::Deneb | Phase::Electra) => Ok(Some(RpcSuccessResponse::BlobsByRoot(
-                Arc::new(BlobSidecar::from_ssz_default(decoded_buffer)?),
-            ))),
-            Some(
-                Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Fulu,
-            ) => Err(RPCError::ErrorResponse(
-                RpcErrorResponse::InvalidRequest,
-                "Invalid fork name for blobs by root".to_string(),
-            )),
+            Some(Phase::Deneb | Phase::Electra | Phase::Fulu) => {
+                Ok(Some(RpcSuccessResponse::BlobsByRoot(Arc::new(
+                    BlobSidecar::from_ssz_default(decoded_buffer)?,
+                ))))
+            }
+            Some(Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella) => {
+                Err(RPCError::ErrorResponse(
+                    RpcErrorResponse::InvalidRequest,
+                    "Invalid fork name for blobs by root".to_string(),
+                ))
+            }
             None => Err(RPCError::ErrorResponse(
                 RpcErrorResponse::InvalidRequest,
                 format!(
@@ -1210,7 +1213,7 @@ mod tests {
         combined::SignedBeaconBlock,
         config::Config,
         deneb::containers::BlobIdentifier,
-        eip7594::DataColumnIdentifier,
+        fulu::containers::DataColumnIdentifier,
         phase0::primitives::{ForkDigest, H256},
         preset::Mainnet,
     };
@@ -1365,12 +1368,12 @@ mod tests {
         })
     }
 
-    fn metadata_v3() -> MetaData {
+    fn metadata_v3(config: &Config) -> MetaData {
         MetaData::V3(MetaDataV3 {
             seq_number: 1,
             attnets: EnrAttestationBitfield::default(),
             syncnets: EnrSyncCommitteeBitfield::default(),
-            custody_subnet_count: 1,
+            custody_subnet_count: config.custody_requirement,
         })
     }
 
@@ -1645,7 +1648,7 @@ mod tests {
             encode_then_decode_response::<Mainnet>(
                 &config,
                 SupportedProtocol::MetaDataV2,
-                RpcResponse::Success(RpcSuccessResponse::MetaData(metadata_v3())),
+                RpcResponse::Success(RpcSuccessResponse::MetaData(metadata_v3(&config))),
                 Phase::Phase0,
             ),
             Ok(Some(RpcSuccessResponse::MetaData(metadata_v2()))),
@@ -1718,21 +1721,7 @@ mod tests {
                 RpcResponse::Success(RpcSuccessResponse::DataColumnsByRange(
                     empty_data_column_sidecar()
                 )),
-                Phase::Deneb,
-            ),
-            Ok(Some(RpcSuccessResponse::DataColumnsByRange(
-                empty_data_column_sidecar()
-            ))),
-        );
-
-        assert_eq!(
-            encode_then_decode_response::<Mainnet>(
-                &config,
-                SupportedProtocol::DataColumnsByRangeV1,
-                RpcResponse::Success(RpcSuccessResponse::DataColumnsByRange(
-                    empty_data_column_sidecar()
-                )),
-                Phase::Electra,
+                Phase::Fulu,
             ),
             Ok(Some(RpcSuccessResponse::DataColumnsByRange(
                 empty_data_column_sidecar()
@@ -1760,21 +1749,7 @@ mod tests {
                 RpcResponse::Success(RpcSuccessResponse::DataColumnsByRoot(
                     empty_data_column_sidecar()
                 )),
-                Phase::Deneb,
-            ),
-            Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
-                empty_data_column_sidecar()
-            ))),
-        );
-
-        assert_eq!(
-            encode_then_decode_response::<Mainnet>(
-                &config,
-                SupportedProtocol::DataColumnsByRootV1,
-                RpcResponse::Success(RpcSuccessResponse::DataColumnsByRoot(
-                    empty_data_column_sidecar()
-                )),
-                Phase::Electra,
+                Phase::Fulu,
             ),
             Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
                 empty_data_column_sidecar()
@@ -1979,6 +1954,42 @@ mod tests {
                 Phase::Altair,
             ),
             Ok(Some(RpcSuccessResponse::MetaData(metadata_v2())))
+        );
+    }
+
+    // Test RPCResponse encoding/decoding for V3 messages
+    #[test]
+    fn test_encode_then_decode_v3() {
+        let config = Arc::new(Config::mainnet().rapid_upgrade());
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::MetaDataV3,
+                RpcResponse::Success(RpcSuccessResponse::MetaData(metadata())),
+                Phase::Phase0,
+            ),
+            Ok(Some(RpcSuccessResponse::MetaData(metadata_v3(&config))))
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::MetaDataV3,
+                RpcResponse::Success(RpcSuccessResponse::MetaData(metadata_v2())),
+                Phase::Altair,
+            ),
+            Ok(Some(RpcSuccessResponse::MetaData(metadata_v3(&config))))
+        );
+
+        assert_eq!(
+            encode_then_decode_response::<Mainnet>(
+                &config,
+                SupportedProtocol::MetaDataV3,
+                RpcResponse::Success(RpcSuccessResponse::MetaData(metadata_v3(&config))),
+                Phase::Fulu,
+            ),
+            Ok(Some(RpcSuccessResponse::MetaData(metadata_v3(&config))))
         );
     }
 
