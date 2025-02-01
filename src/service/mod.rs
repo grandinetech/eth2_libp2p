@@ -736,14 +736,25 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
     /// Subscribe to all required topics for the `phase` with the given `new_fork_digest`.
     pub fn subscribe_new_fork_topics(&mut self, phase: Phase, new_fork_digest: ForkDigest) {
         // Subscribe to existing topics with new fork digest
-        let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
+        let mut subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
+
+        // Deprecate all blob subnets at Fulu fork
+        if phase == Phase::Fulu {
+            let chain_config = self.fork_context.chain_config().clone();
+            let blob_gossip_topics = (0..chain_config.max_blob_sideacar_subnet_count())
+                .map(GossipKind::BlobSidecar)
+                .collect::<Vec<_>>();
+
+            subscriptions.retain(|sub| !blob_gossip_topics.contains(sub.kind()));
+        }
+
         for mut topic in subscriptions.into_iter() {
             topic.fork_digest = new_fork_digest;
             self.subscribe(topic);
         }
 
         // Subscribe to core topics for the new fork
-        for kind in fork_core_topics(&self.network_globals.config, &phase) {
+        for kind in fork_core_topics(&self.network_globals, &phase) {
             let topic = GossipTopic::new(kind, GossipEncoding::default(), new_fork_digest);
             self.subscribe(topic);
         }
@@ -761,20 +772,6 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             .collect::<Vec<TopicHash>>();
         self.gossipsub_mut()
             .register_topics_for_metrics(topics_to_keep_metrics_for);
-    }
-
-    // Subscribe to sampling data column topics
-    pub fn subscribe_to_data_column_topics(&mut self, fork_digest: ForkDigest) {
-        let data_column_topics = self
-            .network_globals
-            .sampling_subnets
-            .iter()
-            .map(|subnet_id| GossipKind::DataColumnSidecar(*subnet_id))
-            .collect::<Vec<_>>();
-        for kind in data_column_topics {
-            let topic = GossipTopic::new(kind, GossipEncoding::default(), fork_digest);
-            self.subscribe(topic);
-        }
     }
 
     /// Unsubscribe from all topics that doesn't have the given fork_digest
