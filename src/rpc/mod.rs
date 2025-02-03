@@ -13,7 +13,7 @@ use libp2p::swarm::{
 };
 use libp2p::swarm::{ConnectionClosed, FromSwarm, SubstreamProtocol, THandlerInEvent};
 use libp2p::PeerId;
-use rate_limiter::{RPCRateLimiter as RateLimiter, RateLimitedErr};
+pub use rate_limiter::{RPCRateLimiter as RateLimiter, RateLimitedErr, RateLimiterItem};
 use slog::{crit, debug, o, trace};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
