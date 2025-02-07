@@ -5,7 +5,6 @@ use strum::AsRefStr;
 use typenum::Unsigned as _;
 use types::{
     altair::consts::SyncCommitteeSubnetCount,
-    config::Config as ChainConfig,
     nonstandard::Phase,
     phase0::{
         consts::AttestationSubnetCount,
@@ -13,7 +12,7 @@ use types::{
     },
 };
 
-use crate::Subnet;
+use crate::{NetworkGlobals, Subnet};
 
 /// The gossipsub topic names.
 // These constants form a topic name of the form /TOPIC_PREFIX/TOPIC/ENCODING_POSTFIX
@@ -54,7 +53,8 @@ pub const LIGHT_CLIENT_GOSSIP_TOPICS: [GossipKind; 2] = [
 ];
 
 /// Returns the core topics associated with each fork that are new to the previous fork
-pub fn fork_core_topics(chain_config: &ChainConfig, phase: &Phase) -> Vec<GossipKind> {
+pub fn fork_core_topics(network_globals: &NetworkGlobals, phase: &Phase) -> Vec<GossipKind> {
+    let chain_config = network_globals.config.as_ref();
     match phase {
         Phase::Phase0 => BASE_CORE_TOPICS.to_vec(),
         Phase::Altair => ALTAIR_CORE_TOPICS.to_vec(),
@@ -81,6 +81,15 @@ pub fn fork_core_topics(chain_config: &ChainConfig, phase: &Phase) -> Vec<Gossip
 
             electra_blob_topics
         }
+        Phase::Fulu => {
+            let mut data_column_topics = Vec::new();
+
+            for subnet_id in network_globals.sampling_subnets.iter() {
+                data_column_topics.push(GossipKind::DataColumnSidecar(*subnet_id));
+            }
+
+            data_column_topics
+        }
     }
 }
 
@@ -98,12 +107,12 @@ pub fn attestation_sync_committee_topics() -> impl Iterator<Item = GossipKind> {
 /// Returns all the topics that we need to subscribe to for a given fork
 /// including topics from older forks and new topics for the current fork.
 pub fn core_topics_to_subscribe(
-    chain_config: &ChainConfig,
+    network_globals: &NetworkGlobals,
     mut current_phase: Phase,
 ) -> Vec<GossipKind> {
-    let mut topics = fork_core_topics(chain_config, &current_phase);
+    let mut topics = fork_core_topics(network_globals, &current_phase);
     while let Some(previous_phase) = previous(&current_phase) {
-        let previous_phase_topics = fork_core_topics(chain_config, &previous_phase);
+        let previous_phase_topics = fork_core_topics(network_globals, &previous_phase);
         topics.extend(previous_phase_topics);
         current_phase = previous_phase;
     }
@@ -348,7 +357,10 @@ fn subnet_topic_index(topic: &str) -> Option<GossipKind> {
 
 #[cfg(test)]
 mod tests {
-    use types::phase0::primitives::H32;
+    use slog::{o, Drain as _, Level};
+    use types::{config::Config as ChainConfig, phase0::primitives::H32};
+
+    use crate::NetworkConfig;
 
     use super::GossipKind::*;
     use super::*;
@@ -470,12 +482,39 @@ mod tests {
         assert_eq!("attester_slashing", AttesterSlashing.as_ref());
     }
 
+    fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+
+        if enabled {
+            slog::Logger::root(drain.filter_level(level).fuse(), o!())
+        } else {
+            slog::Logger::root(drain.filter(|_| false).fuse(), o!())
+        }
+    }
+
     #[test]
     fn test_core_topics_to_subscribe() {
-        let chain_config = ChainConfig::mainnet();
+        let log_level = Level::Debug;
+        let enable_logging = false;
+
+        let log = build_log(log_level, enable_logging);
+        let mut chain_config = ChainConfig::mainnet();
+        chain_config.fulu_fork_epoch = 0;
+
+        let network_config = NetworkConfig::default();
+        let network_globals = NetworkGlobals::new_test_globals(
+            chain_config.into(),
+            vec![],
+            &log,
+            network_config.into(),
+        );
         let mut all_topics = Vec::new();
-        let mut deneb_core_topics = fork_core_topics(&chain_config, &Phase::Deneb);
-        let mut electra_core_topics = fork_core_topics(&chain_config, &Phase::Electra);
+        let mut deneb_core_topics = fork_core_topics(&network_globals, &Phase::Deneb);
+        let mut electra_core_topics = fork_core_topics(&network_globals, &Phase::Electra);
+        let mut fulu_core_topics = fork_core_topics(&network_globals, &Phase::Fulu);
+        all_topics.append(&mut fulu_core_topics);
         all_topics.append(&mut electra_core_topics);
         all_topics.append(&mut deneb_core_topics);
         all_topics.extend(CAPELLA_CORE_TOPICS);
@@ -484,7 +523,7 @@ mod tests {
 
         let latest_fork = enum_iterator::all().last().unwrap();
         assert_eq!(
-            core_topics_to_subscribe(&chain_config, latest_fork),
+            core_topics_to_subscribe(&network_globals, latest_fork),
             all_topics
         );
     }
