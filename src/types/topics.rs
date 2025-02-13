@@ -79,6 +79,7 @@ pub fn fork_core_topics(chain_config: &ChainConfig, phase: &Phase) -> Vec<Gossip
 
             electra_blob_topics
         }
+        Phase::Fulu => vec![],
     }
 }
 
@@ -479,6 +480,8 @@ mod tests {
         let mut all_topics = Vec::new();
         let mut deneb_core_topics = fork_core_topics(&chain_config, &Phase::Deneb);
         let mut electra_core_topics = fork_core_topics(&chain_config, &Phase::Electra);
+        let mut fulu_core_topics = fork_core_topics(&chain_config, &Phase::Fulu);
+        all_topics.append(&mut fulu_core_topics);
         all_topics.append(&mut electra_core_topics);
         all_topics.append(&mut deneb_core_topics);
         all_topics.extend(CAPELLA_CORE_TOPICS);
