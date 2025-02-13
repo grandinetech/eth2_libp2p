@@ -211,7 +211,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         )?;
 
         // construct the metadata
-        let custody_subnet_count = chain_config.is_eip7594_fork_epoch_set().then(|| {
+        let custody_subnet_count = chain_config.is_peerdas_scheduled().then(|| {
             if config.subscribe_all_data_column_subnets {
                 chain_config.data_column_sidecar_subnet_count
             } else {
@@ -772,6 +772,20 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             .register_topics_for_metrics(topics_to_keep_metrics_for);
     }
 
+    // Subscribe to sampling data column topics
+    pub fn subscribe_to_data_column_topics(&mut self, fork_digest: ForkDigest) {
+        let data_column_topics = self
+            .network_globals
+            .sampling_subnets
+            .iter()
+            .map(|subnet_id| GossipKind::DataColumnSidecar(*subnet_id))
+            .collect::<Vec<_>>();
+        for kind in data_column_topics {
+            let topic = GossipTopic::new(kind, GossipEncoding::default(), fork_digest);
+            self.subscribe(topic);
+        }
+    }
+
     /// Unsubscribe from all topics that doesn't have the given fork_digest
     pub fn unsubscribe_from_fork_topics_except(&mut self, except: ForkDigest) {
         let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
@@ -858,7 +872,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             }
             Ok(v) => {
                 // Inform the network
-                debug!(self.log, "Unsubscribed to topic"; "topic" => %topic);
+                debug!(self.log, "Unsubscribed from topic"; "topic" => %topic);
                 v
             }
         }
@@ -1206,7 +1220,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
 
     /// Sends a METADATA request to a peer.
     fn send_meta_data_request(&mut self, peer_id: PeerId) {
-        let event = if self.network_globals.config.is_eip7594_fork_epoch_set() {
+        let event = if self.network_globals.config.is_peerdas_scheduled() {
             // Nodes with higher custody will probably start advertising it
             // before peerdas is activated
             RequestType::MetaData(MetadataRequest::new_v3())

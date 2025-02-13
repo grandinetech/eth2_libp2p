@@ -266,7 +266,7 @@ pub fn build_enr(
     builder.add_value::<Bytes>(SYNC_COMMITTEE_BITFIELD_ENR_KEY, &bitfield.to_ssz()?.into());
 
     // only set `csc` if PeerDAS fork epoch has been scheduled
-    if chain_config.is_eip7594_fork_epoch_set() {
+    if chain_config.is_peerdas_scheduled() {
         let custody_subnet_count = if config.subscribe_all_data_column_subnets {
             chain_config.data_column_sidecar_subnet_count
         } else {
@@ -346,9 +346,9 @@ mod test {
     use super::*;
     use crate::config::Config as NetworkConfig;
 
-    fn make_eip7594_config() -> ChainConfig {
+    fn make_fulu_config() -> ChainConfig {
         let mut chain_config = ChainConfig::mainnet();
-        chain_config.eip7594_fork_epoch = 10;
+        chain_config.fulu_fork_epoch = 10;
         chain_config
     }
 
@@ -369,7 +369,7 @@ mod test {
             subscribe_all_data_column_subnets: false,
             ..NetworkConfig::default()
         };
-        let chain_config = make_eip7594_config();
+        let chain_config = make_fulu_config();
 
         let enr = build_enr_with_config(&chain_config, config).0;
 
@@ -385,7 +385,7 @@ mod test {
             subscribe_all_data_column_subnets: true,
             ..NetworkConfig::default()
         };
-        let chain_config = make_eip7594_config();
+        let chain_config = make_fulu_config();
         let enr = build_enr_with_config(&chain_config, config).0;
 
         assert_eq!(
@@ -397,7 +397,7 @@ mod test {
     #[test]
     fn test_encode_decode_eth2_enr() {
         let config = NetworkConfig::default();
-        let chain_config = make_eip7594_config();
+        let chain_config = make_fulu_config();
         let (enr, _key) = build_enr_with_config(&chain_config, config);
         // Check all Eth2 Mappings are decodeable
         enr.eth2().unwrap();

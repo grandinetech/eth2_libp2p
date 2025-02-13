@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std_ext::ArcExt as _;
 use types::config::Config as ChainConfig;
-use types::eip7594::ColumnIndex;
+use types::fulu::primitives::ColumnIndex;
 use types::phase0::primitives::SubnetId;
 
 pub struct NetworkGlobals {
@@ -52,7 +52,7 @@ impl NetworkGlobals {
         log: &slog::Logger,
         network_config: Arc<NetworkConfig>,
     ) -> Self {
-        let (sampling_subnets, sampling_columns) = if config.is_eip7594_fork_epoch_set() {
+        let (sampling_subnets, sampling_columns) = if config.is_peerdas_scheduled() {
             let node_id = enr.node_id().raw();
 
             let custody_subnet_count = local_metadata
@@ -61,13 +61,13 @@ impl NetworkGlobals {
 
             let subnet_sampling_size = std::cmp::max(custody_subnet_count, config.samples_per_slot);
 
-            let sampling_subnets = compute_custody_subnets(node_id, subnet_sampling_size)
+            let sampling_subnets = compute_custody_subnets(node_id, subnet_sampling_size, &config)
                 .expect("sampling subnet count must be valid")
                 .collect::<Vec<_>>();
 
             let sampling_columns = sampling_subnets
                 .iter()
-                .flat_map(|subnet| columns_for_data_column_subnet(*subnet))
+                .flat_map(|subnet| columns_for_data_column_subnet(*subnet, &config))
                 .sorted()
                 .collect();
 
@@ -224,87 +224,86 @@ impl NetworkGlobals {
     }
 }
 
-// TODO(das): uncomment after merging and updating stubs
-// #[cfg(test)]
-// mod test {
-//     use slog::{o, Drain as _, Level};
+#[cfg(test)]
+mod test {
+    use slog::{o, Drain as _, Level};
 
-//     use super::*;
+    use super::*;
 
-//     pub fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
-//         let decorator = slog_term::TermDecorator::new().build();
-//         let drain = slog_term::FullFormat::new(decorator).build().fuse();
-//         let drain = slog_async::Async::new(drain).build().fuse();
+    pub fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
 
-//         if enabled {
-//             slog::Logger::root(drain.filter_level(level).fuse(), o!())
-//         } else {
-//             slog::Logger::root(drain.filter(|_| false).fuse(), o!())
-//         }
-//     }
+        if enabled {
+            slog::Logger::root(drain.filter_level(level).fuse(), o!())
+        } else {
+            slog::Logger::root(drain.filter(|_| false).fuse(), o!())
+        }
+    }
 
-//     #[test]
-//     fn test_sampling_subnets() {
-//         let log_level = Level::Debug;
-//         let enable_logging = false;
+    #[test]
+    fn test_sampling_subnets() {
+        let log_level = Level::Debug;
+        let enable_logging = false;
 
-//         let log = build_log(log_level, enable_logging);
-//         let mut chain_config = ChainConfig::mainnet();
-//         chain_config.eip7594_fork_epoch = 0;
+        let log = build_log(log_level, enable_logging);
+        let mut chain_config = ChainConfig::mainnet();
+        chain_config.fulu_fork_epoch = 0;
 
-//         let custody_subnet_count = chain_config.data_column_sidecar_subnet_count / 2;
-//         let subnet_sampling_size =
-//             std::cmp::max(custody_subnet_count, chain_config.samples_per_slot);
-//         let metadata = get_metadata(custody_subnet_count);
-//         let config = Arc::new(NetworkConfig::default());
+        let custody_subnet_count = chain_config.data_column_sidecar_subnet_count / 2;
+        let subnet_sampling_size =
+            std::cmp::max(custody_subnet_count, chain_config.samples_per_slot);
+        let metadata = get_metadata(custody_subnet_count);
+        let config = Arc::new(NetworkConfig::default());
 
-//         let globals = NetworkGlobals::new_test_globals_with_metadata(
-//             Arc::new(chain_config),
-//             vec![],
-//             metadata,
-//             &log,
-//             config,
-//         );
-//         assert_eq!(
-//             globals.sampling_subnets.len(),
-//             subnet_sampling_size as usize
-//         );
-//     }
+        let globals = NetworkGlobals::new_test_globals_with_metadata(
+            Arc::new(chain_config),
+            vec![],
+            metadata,
+            &log,
+            config,
+        );
+        assert_eq!(
+            globals.sampling_subnets.len(),
+            subnet_sampling_size as usize
+        );
+    }
 
-//     #[test]
-//     fn test_sampling_columns() {
-//         let log_level = Level::Debug;
-//         let enable_logging = false;
+    #[test]
+    fn test_sampling_columns() {
+        let log_level = Level::Debug;
+        let enable_logging = false;
 
-//         let log = build_log(log_level, enable_logging);
-//         let mut chain_config = ChainConfig::mainnet();
-//         chain_config.eip7594_fork_epoch = 0;
+        let log = build_log(log_level, enable_logging);
+        let mut chain_config = ChainConfig::mainnet();
+        chain_config.fulu_fork_epoch = 0;
 
-//         let custody_subnet_count = chain_config.data_column_sidecar_subnet_count / 2;
-//         let subnet_sampling_size =
-//             std::cmp::max(custody_subnet_count, chain_config.samples_per_slot);
-//         let metadata = get_metadata(custody_subnet_count);
-//         let config = Arc::new(NetworkConfig::default());
+        let custody_subnet_count = chain_config.data_column_sidecar_subnet_count / 2;
+        let subnet_sampling_size =
+            std::cmp::max(custody_subnet_count, chain_config.samples_per_slot);
+        let metadata = get_metadata(custody_subnet_count);
+        let config = Arc::new(NetworkConfig::default());
 
-//         let globals = NetworkGlobals::new_test_globals_with_metadata(
-//             Arc::new(chain_config),
-//             vec![],
-//             metadata,
-//             &log,
-//             config,
-//         );
-//         assert_eq!(
-//             globals.sampling_columns.len(),
-//             subnet_sampling_size as usize
-//         );
-//     }
+        let globals = NetworkGlobals::new_test_globals_with_metadata(
+            Arc::new(chain_config),
+            vec![],
+            metadata,
+            &log,
+            config,
+        );
+        assert_eq!(
+            globals.sampling_columns.len(),
+            subnet_sampling_size as usize
+        );
+    }
 
-//     fn get_metadata(custody_subnet_count: u64) -> MetaData {
-//         MetaData::V3(MetaDataV3 {
-//             seq_number: 0,
-//             attnets: Default::default(),
-//             syncnets: Default::default(),
-//             custody_subnet_count,
-//         })
-//     }
-// }
+    fn get_metadata(custody_subnet_count: u64) -> MetaData {
+        MetaData::V3(MetaDataV3 {
+            seq_number: 0,
+            attnets: Default::default(),
+            syncnets: Default::default(),
+            custody_subnet_count,
+        })
+    }
+}
