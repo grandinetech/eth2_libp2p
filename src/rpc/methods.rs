@@ -22,7 +22,11 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar, NumberOfColumns},
+    fulu::{
+        consts::NumberOfColumns,
+        containers::{DataColumnIdentifier, DataColumnSidecar},
+        primitives::ColumnIndex,
+    },
     phase0::primitives::{Epoch, ForkDigest, Slot, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -1028,6 +1032,18 @@ impl std::fmt::Display for DataColumnsByRootRequest {
             f,
             "Request: DataColumnsByRoot: Number of Requested Data Column Ids: {}",
             self.data_column_ids.len()
+        )
+    }
+}
+
+impl std::fmt::Display for DataColumnsByRangeRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Request: DataColumnsByRange: Start Slot: {}, Count: {}, Number of Requested Columns Ids: {}",
+            self.start_slot,
+            self.count,
+            self.columns.len()
         )
     }
 }
