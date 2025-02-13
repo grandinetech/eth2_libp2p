@@ -1341,7 +1341,7 @@ mod tests {
             seq_number: 1,
             attnets: EnrAttestationBitfield::default(),
             syncnets: EnrSyncCommitteeBitfield::default(),
-            custody_subnet_count: config.custody_requirement,
+            custody_group_count: config.custody_requirement,
         })
     }
 

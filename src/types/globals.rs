@@ -1,10 +1,12 @@
 //! A collection of variables that are accessible outside of the network thread itself.
-use crate::eip7594::{columns_for_data_column_subnet, compute_custody_subnets, from_column_index};
 use crate::peer_manager::peerdb::PeerDB;
 use crate::rpc::{MetaData, MetaDataV3};
 use crate::types::{BackFillState, SyncState};
 use crate::{Client, Enr, EnrExt, GossipTopic, Multiaddr, NetworkConfig, PeerId};
-use itertools::Itertools as _;
+use eip_7594::{
+    compute_columns_for_custody_group, compute_subnets_from_custody_group, get_custody_groups,
+};
+use helper_functions::misc::compute_subnet_for_data_column_sidecar;
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -33,8 +35,8 @@ pub struct NetworkGlobals {
     /// The current state of the backfill sync.
     pub backfill_state: RwLock<BackFillState>,
     /// The computed sampling subnets and columns is stored to avoid re-computing.
-    pub sampling_subnets: Vec<SubnetId>,
-    pub sampling_columns: Vec<ColumnIndex>,
+    pub sampling_subnets: HashSet<SubnetId>,
+    pub sampling_columns: HashSet<ColumnIndex>,
     /// Target subnet peers.
     pub target_subnet_peers: usize,
     /// Network-related configuration. Immutable after initialization.
@@ -55,25 +57,32 @@ impl NetworkGlobals {
         let (sampling_subnets, sampling_columns) = if config.is_peerdas_scheduled() {
             let node_id = enr.node_id().raw();
 
-            let custody_subnet_count = local_metadata
-                .custody_subnet_count()
-                .expect("custody subnet count must be set if PeerDAS is scheduled");
+            let custody_group_count = local_metadata
+                .custody_group_count()
+                .expect("custody group count must be set if PeerDAS is scheduled");
 
-            let subnet_sampling_size = std::cmp::max(custody_subnet_count, config.samples_per_slot);
+            let sampling_size = config.sampling_size(custody_group_count);
 
-            let sampling_subnets = compute_custody_subnets(node_id, subnet_sampling_size, &config)
-                .expect("sampling subnet count must be valid")
-                .collect::<Vec<_>>();
+            let custody_groups = get_custody_groups(node_id, sampling_size, &config)
+                .expect("should compute custody groups for node");
 
-            let sampling_columns = sampling_subnets
-                .iter()
-                .flat_map(|subnet| columns_for_data_column_subnet(*subnet, &config))
-                .sorted()
-                .collect();
+            let mut sampling_subnets = HashSet::new();
+            for custody_index in &custody_groups {
+                let subnets = compute_subnets_from_custody_group(*custody_index, &config)
+                    .expect("should compute custody subnets for node");
+                sampling_subnets.extend(subnets);
+            }
+
+            let mut sampling_columns = HashSet::new();
+            for custody_index in &custody_groups {
+                let columns = compute_columns_for_custody_group(*custody_index, &config)
+                    .expect("should compute custody columns for node");
+                sampling_columns.extend(columns);
+            }
 
             (sampling_subnets, sampling_columns)
         } else {
-            (vec![], vec![])
+            (HashSet::new(), HashSet::new())
         };
 
         NetworkGlobals {
@@ -172,7 +181,10 @@ impl NetworkGlobals {
     pub fn custody_peers_for_column(&self, column_index: ColumnIndex) -> Vec<PeerId> {
         self.peers
             .read()
-            .good_custody_subnet_peer(from_column_index(column_index as usize, &self.config))
+            .good_custody_subnet_peer(compute_subnet_for_data_column_sidecar(
+                &self.config,
+                column_index,
+            ))
             .cloned()
             .collect::<Vec<_>>()
     }
@@ -188,7 +200,7 @@ impl NetworkGlobals {
             seq_number: 0,
             attnets: Default::default(),
             syncnets: Default::default(),
-            custody_subnet_count: chain_config.custody_requirement,
+            custody_group_count: chain_config.custody_requirement,
         });
 
         Self::new_test_globals_with_metadata(
@@ -251,10 +263,9 @@ mod test {
         let mut chain_config = ChainConfig::mainnet();
         chain_config.fulu_fork_epoch = 0;
 
-        let custody_subnet_count = chain_config.data_column_sidecar_subnet_count / 2;
-        let subnet_sampling_size =
-            std::cmp::max(custody_subnet_count, chain_config.samples_per_slot);
-        let metadata = get_metadata(custody_subnet_count);
+        let custody_group_count = chain_config.number_of_custody_groups / 2;
+        let sampling_size = chain_config.sampling_size(custody_group_count);
+        let metadata = get_metadata(custody_group_count);
         let config = Arc::new(NetworkConfig::default());
 
         let globals = NetworkGlobals::new_test_globals_with_metadata(
@@ -264,10 +275,7 @@ mod test {
             &log,
             config,
         );
-        assert_eq!(
-            globals.sampling_subnets.len(),
-            subnet_sampling_size as usize
-        );
+        assert_eq!(globals.sampling_subnets.len(), sampling_size as usize);
     }
 
     #[test]
@@ -279,10 +287,9 @@ mod test {
         let mut chain_config = ChainConfig::mainnet();
         chain_config.fulu_fork_epoch = 0;
 
-        let custody_subnet_count = chain_config.data_column_sidecar_subnet_count / 2;
-        let subnet_sampling_size =
-            std::cmp::max(custody_subnet_count, chain_config.samples_per_slot);
-        let metadata = get_metadata(custody_subnet_count);
+        let custody_group_count = chain_config.number_of_custody_groups / 2;
+        let sampling_size = chain_config.sampling_size(custody_group_count);
+        let metadata = get_metadata(custody_group_count);
         let config = Arc::new(NetworkConfig::default());
 
         let globals = NetworkGlobals::new_test_globals_with_metadata(
@@ -292,18 +299,15 @@ mod test {
             &log,
             config,
         );
-        assert_eq!(
-            globals.sampling_columns.len(),
-            subnet_sampling_size as usize
-        );
+        assert_eq!(globals.sampling_subnets.len(), sampling_size as usize);
     }
 
-    fn get_metadata(custody_subnet_count: u64) -> MetaData {
+    fn get_metadata(custody_group_count: u64) -> MetaData {
         MetaData::V3(MetaDataV3 {
             seq_number: 0,
             attnets: Default::default(),
             syncnets: Default::default(),
-            custody_subnet_count,
+            custody_group_count,
         })
     }
 }
