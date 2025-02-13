@@ -20,7 +20,6 @@ use tokio_util::{
 };
 use typenum::Unsigned as _;
 use types::deneb::containers::BlobIdentifier;
-use types::eip7594::DataColumnIdentifier;
 use types::{
     altair::containers::{
         LightClientBootstrap as AltairLightClientBootstrap,
@@ -29,7 +28,7 @@ use types::{
         LightClientUpdate as AltairLightClientUpdate,
     },
     config::Config as ChainConfig,
-    eip7594::DataColumnSidecar,
+    eip7594::{DataColumnIdentifier, DataColumnSidecar},
     nonstandard::Phase,
     preset::{Mainnet, Preset},
 };
@@ -96,7 +95,7 @@ fn rpc_light_client_updates_by_range_limits_by_fork<P: Preset>(current_fork: Pha
     match &current_fork {
         Phase::Phase0 => RpcLimits::new(0, 0),
         Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
-        Phase::Capella | Phase::Deneb | Phase::Electra => RpcLimits::new(
+        Phase::Capella | Phase::Deneb | Phase::Electra | Phase::Fulu => RpcLimits::new(
             altair_fixed_len,
             altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
         ),
@@ -113,6 +112,10 @@ fn rpc_light_client_finality_update_limits_by_fork<P: Preset>(current_fork: Phas
             altair_fixed_len,
             altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
         ),
+        Phase::Fulu => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
     }
 }
 
@@ -126,6 +129,10 @@ fn rpc_light_client_optimistic_update_limits_by_fork<P: Preset>(current_fork: Ph
             altair_fixed_len,
             altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
         ),
+        Phase::Fulu => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
     }
 }
 
@@ -136,6 +143,10 @@ fn rpc_light_client_bootstrap_limits_by_fork<P: Preset>(current_fork: Phase) -> 
         Phase::Phase0 => RpcLimits::new(0, 0),
         Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
         Phase::Capella | Phase::Deneb | Phase::Electra => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+        Phase::Fulu => RpcLimits::new(
             altair_fixed_len,
             altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
         ),
