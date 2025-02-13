@@ -211,20 +211,13 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         )?;
 
         // construct the metadata
-        let custody_subnet_count = chain_config.is_peerdas_scheduled().then(|| {
-            if config.subscribe_all_data_column_subnets {
-                chain_config.data_column_sidecar_subnet_count
-            } else {
-                chain_config.custody_requirement
-            }
-        });
+        let custody_group_count = chain_config
+            .is_peerdas_scheduled()
+            .then(|| chain_config.custody_group_count(config.subscribe_all_data_column_subnets));
 
         // Construct the metadata
-        let meta_data = utils::load_or_build_metadata(
-            config.network_dir.as_deref(),
-            custody_subnet_count,
-            &log,
-        );
+        let meta_data =
+            utils::load_or_build_metadata(config.network_dir.as_deref(), custody_group_count, &log);
         let seq_number = meta_data.seq_number();
         let globals = NetworkGlobals::new(
             chain_config.clone_arc(),

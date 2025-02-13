@@ -26,8 +26,8 @@ pub const ETH2_ENR_KEY: &str = "eth2";
 pub const ATTESTATION_BITFIELD_ENR_KEY: &str = "attnets";
 /// The ENR field specifying the sync committee subnet bitfield.
 pub const SYNC_COMMITTEE_BITFIELD_ENR_KEY: &str = "syncnets";
-/// The ENR field specifying the peerdas custody subnet count.
-pub const PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY: &str = "csc";
+/// The ENR field specifying the peerdas custody group count.
+pub const PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY: &str = "cgc";
 
 /// Extension trait for ENR's within Eth2.
 pub trait Eth2Enr {
@@ -37,8 +37,8 @@ pub trait Eth2Enr {
     /// The sync committee subnet bitfield associated with the ENR.
     fn sync_committee_bitfield(&self) -> Result<EnrSyncCommitteeBitfield, &'static str>;
 
-    /// The peerdas custody subnet count associated with the ENR.
-    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> Result<u64, &'static str>;
+    /// The peerdas custody group count associated with the ENR.
+    fn custody_group_count(&self, config: &ChainConfig) -> Result<u64, &'static str>;
 
     fn eth2(&self) -> Result<EnrForkId, &'static str>;
 }
@@ -64,20 +64,17 @@ impl Eth2Enr for Enr {
             .map_err(|_| "Could not decode the ENR syncnets bitfield")
     }
 
-    /// if the custody value is non-existent in the ENR, then we assume the minimum custody value
-    /// defined in the spec.
-    fn custody_subnet_count(&self, chain_config: &ChainConfig) -> Result<u64, &'static str> {
-        let csc = self
-            .get_decodable::<u64>(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY)
-            .ok_or("ENR custody subnet count non-existent")?
-            .map_err(|_| "Could not decode the ENR custody subnet count")?;
+    fn custody_group_count(&self, chain_config: &ChainConfig) -> Result<u64, &'static str> {
+        let cgc = self
+            .get_decodable::<u64>(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY)
+            .ok_or("ENR custody group count non-existent")?
+            .map_err(|_| "Could not decode the ENR custody group count")?;
 
-        if csc >= chain_config.custody_requirement
-            && csc <= chain_config.data_column_sidecar_subnet_count
+        if (chain_config.custody_requirement..=chain_config.number_of_custody_groups).contains(&cgc)
         {
-            Ok(csc)
+            Ok(cgc)
         } else {
-            Err("Invalid custody subnet count in ENR")
+            Err("Invalid custody group count in ENR")
         }
     }
 
@@ -267,12 +264,12 @@ pub fn build_enr(
 
     // only set `csc` if PeerDAS fork epoch has been scheduled
     if chain_config.is_peerdas_scheduled() {
-        let custody_subnet_count = if config.subscribe_all_data_column_subnets {
-            chain_config.data_column_sidecar_subnet_count
+        let custody_group_count = if config.subscribe_all_data_column_subnets {
+            chain_config.number_of_custody_groups
         } else {
             chain_config.custody_requirement
         };
-        builder.add_value(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY, &custody_subnet_count);
+        builder.add_value(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY, &custody_group_count);
     }
 
     builder
@@ -303,7 +300,7 @@ fn compare_enr(local_enr: &Enr, disk_enr: &Enr) -> bool {
         // likely only be true for non-validating nodes.
         && local_enr.get_decodable::<Bytes>(ATTESTATION_BITFIELD_ENR_KEY) == disk_enr.get_decodable(ATTESTATION_BITFIELD_ENR_KEY)
         && local_enr.get_decodable::<Bytes>(SYNC_COMMITTEE_BITFIELD_ENR_KEY) == disk_enr.get_decodable(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
-        && local_enr.get_decodable::<Bytes>(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY) == disk_enr.get_decodable(PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY)
+        && local_enr.get_decodable::<Bytes>(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY) == disk_enr.get_decodable(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY)
 }
 
 /// Loads enr from the given directory
@@ -364,7 +361,7 @@ mod test {
     }
 
     #[test]
-    fn custody_subnet_count_default() {
+    fn custody_group_count_default() {
         let config = NetworkConfig {
             subscribe_all_data_column_subnets: false,
             ..NetworkConfig::default()
@@ -374,13 +371,13 @@ mod test {
         let enr = build_enr_with_config(&chain_config, config).0;
 
         assert_eq!(
-            enr.custody_subnet_count(&chain_config).unwrap(),
+            enr.custody_group_count(&chain_config).unwrap(),
             chain_config.custody_requirement,
         );
     }
 
     #[test]
-    fn custody_subnet_count_all() {
+    fn custody_group_count_all() {
         let config = NetworkConfig {
             subscribe_all_data_column_subnets: true,
             ..NetworkConfig::default()
@@ -389,8 +386,8 @@ mod test {
         let enr = build_enr_with_config(&chain_config, config).0;
 
         assert_eq!(
-            enr.custody_subnet_count(&chain_config).unwrap(),
-            chain_config.data_column_sidecar_subnet_count,
+            enr.custody_group_count(&chain_config).unwrap(),
+            chain_config.number_of_custody_groups,
         );
     }
 
