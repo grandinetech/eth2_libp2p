@@ -20,7 +20,7 @@ use tokio_util::{
 };
 use typenum::Unsigned as _;
 use types::deneb::containers::BlobIdentifier;
-use types::eip7594::DataColumnIdentifier;
+use types::fulu::containers::{DataColumnIdentifier, DataColumnSidecar};
 use types::{
     altair::containers::{
         LightClientBootstrap as AltairLightClientBootstrap,
@@ -29,7 +29,6 @@ use types::{
         LightClientUpdate as AltairLightClientUpdate,
     },
     config::Config as ChainConfig,
-    eip7594::DataColumnSidecar,
     nonstandard::Phase,
     preset::{Mainnet, Preset},
 };
@@ -96,7 +95,7 @@ fn rpc_light_client_updates_by_range_limits_by_fork<P: Preset>(current_fork: Pha
     match &current_fork {
         Phase::Phase0 => RpcLimits::new(0, 0),
         Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
-        Phase::Capella | Phase::Deneb | Phase::Electra => RpcLimits::new(
+        Phase::Capella | Phase::Deneb | Phase::Electra | Phase::Fulu => RpcLimits::new(
             altair_fixed_len,
             altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
         ),
@@ -113,6 +112,10 @@ fn rpc_light_client_finality_update_limits_by_fork<P: Preset>(current_fork: Phas
             altair_fixed_len,
             altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
         ),
+        Phase::Fulu => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
     }
 }
 
@@ -126,6 +129,10 @@ fn rpc_light_client_optimistic_update_limits_by_fork<P: Preset>(current_fork: Ph
             altair_fixed_len,
             altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
         ),
+        Phase::Fulu => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
     }
 }
 
@@ -136,6 +143,10 @@ fn rpc_light_client_bootstrap_limits_by_fork<P: Preset>(current_fork: Phase) -> 
         Phase::Phase0 => RpcLimits::new(0, 0),
         Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
         Phase::Capella | Phase::Deneb | Phase::Electra => RpcLimits::new(
+            altair_fixed_len,
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+        ),
+        Phase::Fulu => RpcLimits::new(
             altair_fixed_len,
             altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
         ),
@@ -299,7 +310,7 @@ impl SupportedProtocol {
             ProtocolId::new(Self::BlocksByRootV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::PingV1, Encoding::SSZSnappy),
         ];
-        if fork_context.chain_config().is_eip7594_fork_epoch_set() {
+        if fork_context.chain_config().is_peerdas_scheduled() {
             supported.extend_from_slice(&[
                 // V3 variants have higher preference for protocol negotation
                 ProtocolId::new(Self::MetaDataV3, Encoding::SSZSnappy),
@@ -318,7 +329,7 @@ impl SupportedProtocol {
                 ProtocolId::new(SupportedProtocol::BlobsByRangeV1, Encoding::SSZSnappy),
             ]);
         }
-        if fork_context.chain_config().is_eip7594_fork_epoch_set() {
+        if fork_context.chain_config().is_peerdas_scheduled() {
             supported.extend_from_slice(&[
                 ProtocolId::new(SupportedProtocol::DataColumnsByRootV1, Encoding::SSZSnappy),
                 ProtocolId::new(SupportedProtocol::DataColumnsByRangeV1, Encoding::SSZSnappy),

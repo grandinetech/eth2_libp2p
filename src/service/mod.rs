@@ -211,20 +211,13 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         )?;
 
         // construct the metadata
-        let custody_subnet_count = chain_config.is_eip7594_fork_epoch_set().then(|| {
-            if config.subscribe_all_data_column_subnets {
-                chain_config.data_column_sidecar_subnet_count
-            } else {
-                chain_config.custody_requirement
-            }
-        });
+        let custody_group_count = chain_config
+            .is_peerdas_scheduled()
+            .then(|| chain_config.custody_group_count(config.subscribe_all_data_column_subnets));
 
         // Construct the metadata
-        let meta_data = utils::load_or_build_metadata(
-            config.network_dir.as_deref(),
-            custody_subnet_count,
-            &log,
-        );
+        let meta_data =
+            utils::load_or_build_metadata(config.network_dir.as_deref(), custody_group_count, &log);
         let seq_number = meta_data.seq_number();
         let globals = NetworkGlobals::new(
             chain_config.clone_arc(),
@@ -745,14 +738,25 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
     /// Subscribe to all required topics for the `phase` with the given `new_fork_digest`.
     pub fn subscribe_new_fork_topics(&mut self, phase: Phase, new_fork_digest: ForkDigest) {
         // Subscribe to existing topics with new fork digest
-        let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
+        let mut subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
+
+        // Deprecate all blob subnets at Fulu fork
+        if phase == Phase::Fulu {
+            let chain_config = self.fork_context.chain_config().clone();
+            let blob_gossip_topics = (0..chain_config.max_blob_sideacar_subnet_count())
+                .map(GossipKind::BlobSidecar)
+                .collect::<Vec<_>>();
+
+            subscriptions.retain(|sub| !blob_gossip_topics.contains(sub.kind()));
+        }
+
         for mut topic in subscriptions.into_iter() {
             topic.fork_digest = new_fork_digest;
             self.subscribe(topic);
         }
 
         // Subscribe to core topics for the new fork
-        for kind in fork_core_topics(&self.network_globals.config, &phase) {
+        for kind in fork_core_topics(&self.network_globals, &phase) {
             let topic = GossipTopic::new(kind, GossipEncoding::default(), new_fork_digest);
             self.subscribe(topic);
         }
@@ -858,7 +862,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             }
             Ok(v) => {
                 // Inform the network
-                debug!(self.log, "Unsubscribed to topic"; "topic" => %topic);
+                debug!(self.log, "Unsubscribed from topic"; "topic" => %topic);
                 v
             }
         }
@@ -1206,7 +1210,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
 
     /// Sends a METADATA request to a peer.
     fn send_meta_data_request(&mut self, peer_id: PeerId) {
-        let event = if self.network_globals.config.is_eip7594_fork_epoch_set() {
+        let event = if self.network_globals.config.is_peerdas_scheduled() {
             // Nodes with higher custody will probably start advertising it
             // before peerdas is activated
             RequestType::MetaData(MetadataRequest::new_v3())

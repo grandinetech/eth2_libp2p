@@ -7,7 +7,7 @@ use types::{
         LightClientUpdate, SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
-    eip7594::DataColumnSidecar,
+    fulu::containers::DataColumnSidecar,
     preset::Preset,
 };
 
