@@ -450,7 +450,7 @@ pub struct DataColumnsByRangeRequest {
     /// The number of slots from the start slot.
     pub count: u64,
     /// The list column indices being requested.
-    pub columns: ContiguousList<ColumnIndex, NumberOfColumns>,
+    pub columns: Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
 }
 
 impl DataColumnsByRangeRequest {
@@ -462,7 +462,7 @@ impl DataColumnsByRangeRequest {
         Ok(DataColumnsByRangeRequest {
             start_slot: 0,
             count: 0,
-            columns: ContiguousList::try_from(vec![0])?,
+            columns: Arc::new(ContiguousList::try_from(vec![0])?),
         }
         .to_ssz()?
         .len())
@@ -472,7 +472,7 @@ impl DataColumnsByRangeRequest {
         Ok(DataColumnsByRangeRequest {
             start_slot: 0,
             count: 0,
-            columns: ContiguousList::full(0),
+            columns: Arc::new(ContiguousList::full(0)),
         }
         .to_ssz()?
         .len())

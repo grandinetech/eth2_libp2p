@@ -1233,6 +1233,7 @@ mod tests {
             start_slot: 0,
             count: 10,
             columns: ContiguousList::try_from(vec![1, 2, 3])
+                .map(Arc::new)
                 .expect("ColumnIndex list can be created from list of numbers"),
         }
     }
