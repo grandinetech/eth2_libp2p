@@ -1,10 +1,9 @@
 use std::collections::HashSet;
 
-use enum_iterator::previous;
 use gossipsub::{IdentTopic as Topic, TopicHash};
 use serde::{Deserialize, Serialize};
 use strum::AsRefStr;
-use typenum::Unsigned as _;
+use typenum::Unsigned;
 use types::{
     altair::consts::SyncCommitteeSubnetCount,
     config::Config as ChainConfig,
@@ -36,107 +35,110 @@ pub const BLS_TO_EXECUTION_CHANGE_TOPIC: &str = "bls_to_execution_change";
 pub const LIGHT_CLIENT_FINALITY_UPDATE: &str = "light_client_finality_update";
 pub const LIGHT_CLIENT_OPTIMISTIC_UPDATE: &str = "light_client_optimistic_update";
 
-pub const BASE_CORE_TOPICS: [GossipKind; 5] = [
-    GossipKind::BeaconBlock,
-    GossipKind::BeaconAggregateAndProof,
-    GossipKind::VoluntaryExit,
-    GossipKind::ProposerSlashing,
-    GossipKind::AttesterSlashing,
-];
-
-pub const ALTAIR_CORE_TOPICS: [GossipKind; 1] = [GossipKind::SignedContributionAndProof];
-
-pub const CAPELLA_CORE_TOPICS: [GossipKind; 1] = [GossipKind::BlsToExecutionChange];
-
-pub const LIGHT_CLIENT_GOSSIP_TOPICS: [GossipKind; 2] = [
-    GossipKind::LightClientFinalityUpdate,
-    GossipKind::LightClientOptimisticUpdate,
-];
-
 #[derive(Debug)]
 pub struct TopicConfig<'a> {
+    pub enable_light_client_server: bool,
+    pub subscribe_all_subnets: bool,
     pub subscribe_all_data_column_subnets: bool,
     pub sampling_subnets: &'a HashSet<SubnetId>,
 }
 
-/// Returns the core topics associated with each fork that are new to the previous fork
-pub fn fork_core_topics(
-    chain_config: &ChainConfig,
-    phase: &Phase,
-    topic_config: &TopicConfig,
-) -> Vec<GossipKind> {
-    match phase {
-        Phase::Phase0 => BASE_CORE_TOPICS.to_vec(),
-        Phase::Altair => ALTAIR_CORE_TOPICS.to_vec(),
-        Phase::Bellatrix => vec![],
-        Phase::Capella => CAPELLA_CORE_TOPICS.to_vec(),
-        Phase::Deneb => {
-            // All of deneb blob topics are core topics
-            let mut deneb_blob_topics = Vec::new();
-            for i in 0..chain_config.blob_sidecar_subnet_count(Phase::Deneb).into() {
-                deneb_blob_topics.push(GossipKind::BlobSidecar(i));
-            }
-            deneb_blob_topics
-        }
-        Phase::Electra => {
-            // All of electra blob topics are core topics
-            let mut electra_blob_topics = Vec::new();
-
-            for i in 0..chain_config
-                .blob_sidecar_subnet_count(Phase::Electra)
-                .into()
-            {
-                electra_blob_topics.push(GossipKind::BlobSidecar(i));
-            }
-
-            electra_blob_topics
-        }
-        Phase::Fulu => {
-            let mut topics = vec![];
-            if topic_config.subscribe_all_data_column_subnets {
-                for column_subnet in 0..chain_config.data_column_sidecar_subnet_count {
-                    topics.push(GossipKind::DataColumnSidecar(column_subnet as SubnetId));
-                }
-            } else {
-                for column_subnet in topic_config.sampling_subnets {
-                    topics.push(GossipKind::DataColumnSidecar(*column_subnet));
-                }
-            }
-            topics
-        }
-    }
-}
-
-/// Returns all the attestation and sync committee topics, for a given fork.
-pub fn attestation_sync_committee_topics() -> impl Iterator<Item = GossipKind> {
-    (0..AttestationSubnetCount::USIZE)
-        .map(|subnet_id| GossipKind::Attestation(subnet_id as SubnetId))
-        .chain(
-            (0..SyncCommitteeSubnetCount::USIZE).map(|sync_committee_id| {
-                GossipKind::SyncCommitteeMessage(sync_committee_id as SubnetId)
-            }),
-        )
-}
-
-/// Returns all the topics that we need to subscribe to for a given fork
-/// including topics from older forks and new topics for the current fork.
+/// Returns all the topics the node should subscribe at `current_phase`
 pub fn core_topics_to_subscribe(
     chain_config: &ChainConfig,
-    mut current_phase: Phase,
-    topic_config: &TopicConfig,
+    current_phase: Phase,
+    opts: &TopicConfig,
 ) -> Vec<GossipKind> {
-    let mut topics = fork_core_topics(chain_config, &current_phase, topic_config);
-    while let Some(previous_phase) = previous(&current_phase) {
-        let previous_phase_topics = fork_core_topics(chain_config, &previous_phase, topic_config);
-        topics.extend(previous_phase_topics);
-        current_phase = previous_phase;
+    let mut topics = vec![
+        GossipKind::BeaconBlock,
+        GossipKind::BeaconAggregateAndProof,
+        GossipKind::VoluntaryExit,
+        GossipKind::ProposerSlashing,
+        GossipKind::AttesterSlashing,
+    ];
+
+    if opts.subscribe_all_subnets {
+        for i in 0..AttestationSubnetCount::U64 {
+            topics.push(GossipKind::Attestation(i.into()));
+        }
     }
-    // Remove duplicates
+
+    if current_phase >= Phase::Altair {
+        topics.push(GossipKind::SignedContributionAndProof);
+
+        if opts.subscribe_all_subnets {
+            for i in 0..SyncCommitteeSubnetCount::U64 {
+                topics.push(GossipKind::SyncCommitteeMessage(i.into()));
+            }
+        }
+
+        if opts.enable_light_client_server {
+            topics.push(GossipKind::LightClientFinalityUpdate);
+            topics.push(GossipKind::LightClientOptimisticUpdate);
+        }
+    }
+
+    if current_phase >= Phase::Capella {
+        topics.push(GossipKind::BlsToExecutionChange);
+    }
+
+    if current_phase >= Phase::Deneb && !current_phase.is_peerdas_activated() {
+        // All of deneb blob topics are core topics
+        for i in 0..chain_config.blob_sidecar_subnet_count(current_phase).into() {
+            topics.push(GossipKind::BlobSidecar(i));
+        }
+    }
+
+    if current_phase.is_peerdas_activated() {
+        if opts.subscribe_all_data_column_subnets {
+            for column_subnet in 0..chain_config.data_column_sidecar_subnet_count {
+                topics.push(GossipKind::DataColumnSidecar(column_subnet as SubnetId));
+            }
+        } else {
+            for column_subnet in opts.sampling_subnets {
+                topics.push(GossipKind::DataColumnSidecar(*column_subnet));
+            }
+        }
+    }
+
     topics
-        .into_iter()
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect()
+}
+
+/// Returns true if a given non-core `GossipTopic` MAY be subscribe at this fork.
+///
+/// For example: the `Attestation` topic is not subscribed as a core topic if
+/// subscribe_all_subnets = false` but we may subscribe to it outside of a fork
+/// boundary if the node is an aggregator.
+pub fn is_fork_non_core_topic(topic: &GossipTopic, _phase: Phase) -> bool {
+    match topic.kind() {
+        // Node may be aggregator of attestation and sync_committee_message topics for all known
+        // forks
+        GossipKind::Attestation(_) | GossipKind::SyncCommitteeMessage(_) => true,
+        // All these topics are core-only
+        GossipKind::BeaconBlock
+        | GossipKind::BeaconAggregateAndProof
+        | GossipKind::BlobSidecar(_)
+        | GossipKind::DataColumnSidecar(_)
+        | GossipKind::VoluntaryExit
+        | GossipKind::ProposerSlashing
+        | GossipKind::AttesterSlashing
+        | GossipKind::SignedContributionAndProof
+        | GossipKind::BlsToExecutionChange
+        | GossipKind::LightClientFinalityUpdate
+        | GossipKind::LightClientOptimisticUpdate => false,
+    }
+}
+
+pub fn all_topics_at_fork(chain_config: &ChainConfig, current_phase: Phase) -> Vec<GossipKind> {
+    // Compute the worst case of all forks
+    let sampling_subnets = HashSet::from_iter(0..chain_config.data_column_sidecar_subnet_count);
+    let opts = TopicConfig {
+        enable_light_client_server: true,
+        subscribe_all_subnets: true,
+        subscribe_all_data_column_subnets: true,
+        sampling_subnets: &sampling_subnets,
+    };
+    core_topics_to_subscribe(chain_config, current_phase, &opts)
 }
 
 /// A gossipsub topic which encapsulates the type of messages that should be sent and received over
@@ -500,30 +502,94 @@ mod tests {
         assert_eq!("attester_slashing", AttesterSlashing.as_ref());
     }
 
+    fn get_chain_config() -> ChainConfig {
+        let mut config = ChainConfig::default();
+        config.altair_fork_epoch = 1;
+        config.bellatrix_fork_epoch = 2;
+        config.capella_fork_epoch = 3;
+        config.deneb_fork_epoch = 4;
+        config.electra_fork_epoch = 5;
+        config.fulu_fork_epoch = 6;
+        config
+    }
+
+    fn get_sampling_subnets() -> HashSet<SubnetId> {
+        HashSet::new()
+    }
+
+    fn get_topic_config(sampling_subnets: &HashSet<SubnetId>) -> TopicConfig {
+        TopicConfig {
+            enable_light_client_server: false,
+            subscribe_all_subnets: false,
+            subscribe_all_data_column_subnets: false,
+            sampling_subnets,
+        }
+    }
+
+    #[test]
+    fn base_topics_are_always_active() {
+        let config = get_chain_config();
+        let s = get_sampling_subnets();
+        let topic_config = get_topic_config(&s);
+        for phase in enum_iterator::all() {
+            assert!(core_topics_to_subscribe(&config, phase, &topic_config)
+                .contains(&GossipKind::BeaconBlock));
+        }
+    }
+
+    #[test]
+    fn blobs_are_not_subscribed_in_peerdas() {
+        let config = get_chain_config();
+        let s = get_sampling_subnets();
+        let topic_config = get_topic_config(&s);
+        assert!(
+            !core_topics_to_subscribe(&config, Phase::Fulu, &topic_config)
+                .contains(&GossipKind::BlobSidecar(0))
+        );
+    }
+
+    #[test]
+    fn columns_are_subscribed_in_peerdas() {
+        let config = get_chain_config();
+        let s = get_sampling_subnets();
+        let mut topic_config = get_topic_config(&s);
+        topic_config.subscribe_all_data_column_subnets = true;
+        assert!(
+            core_topics_to_subscribe(&config, Phase::Fulu, &topic_config)
+                .contains(&GossipKind::DataColumnSidecar(0 as SubnetId))
+        )
+    }
+
     #[test]
     fn test_core_topics_to_subscribe() {
-        let chain_config = ChainConfig::mainnet();
-        let mut all_topics = Vec::new();
-        let topic_config = TopicConfig {
-            subscribe_all_data_column_subnets: false,
-            sampling_subnets: &HashSet::from_iter((0..10u64).map(Into::into)),
-        };
-        let mut deneb_core_topics = fork_core_topics(&chain_config, &Phase::Deneb, &topic_config);
-        let mut electra_core_topics =
-            fork_core_topics(&chain_config, &Phase::Electra, &topic_config);
-        let mut fulu_core_topics = fork_core_topics(&chain_config, &Phase::Fulu, &topic_config);
-        all_topics.append(&mut fulu_core_topics);
-        all_topics.append(&mut electra_core_topics);
-        all_topics.append(&mut deneb_core_topics);
-        all_topics.extend(CAPELLA_CORE_TOPICS);
-        all_topics.extend(ALTAIR_CORE_TOPICS);
-        all_topics.extend(BASE_CORE_TOPICS);
-
+        let config = get_chain_config();
+        let s = HashSet::from_iter([1, 2].map(|s| s as SubnetId));
+        let mut topic_config = get_topic_config(&s);
+        topic_config.enable_light_client_server = true;
         let latest_fork = Phase::last().unwrap_or(Phase::Phase0);
-        let core_topics = core_topics_to_subscribe(&chain_config, latest_fork, &topic_config);
+        let topics = core_topics_to_subscribe(&config, latest_fork, &topic_config);
+
+        let mut expected_topics = vec![
+            GossipKind::BeaconBlock,
+            GossipKind::BeaconAggregateAndProof,
+            GossipKind::VoluntaryExit,
+            GossipKind::ProposerSlashing,
+            GossipKind::AttesterSlashing,
+            GossipKind::SignedContributionAndProof,
+            GossipKind::LightClientFinalityUpdate,
+            GossipKind::LightClientOptimisticUpdate,
+            GossipKind::BlsToExecutionChange,
+        ];
+        for subnet in s {
+            expected_topics.push(GossipKind::DataColumnSidecar(subnet));
+        }
         // Need to check all the topics exist in an order independent manner
-        for topic in all_topics {
-            assert!(core_topics.contains(&topic));
+        for expected_topic in expected_topics {
+            assert!(
+                topics.contains(&expected_topic),
+                "Should contain {:?}",
+                expected_topic,
+            );
         }
     }
 }

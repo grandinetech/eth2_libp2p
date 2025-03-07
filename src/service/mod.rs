@@ -15,9 +15,9 @@ use crate::rpc::{
     RPC,
 };
 use crate::types::{
-    attestation_sync_committee_topics, fork_core_topics, subnet_from_topic_hash, EnrForkId,
-    ForkContext, GossipEncoding, GossipKind, GossipTopic, SnappyTransform, Subnet, SubnetDiscovery,
-    ALTAIR_CORE_TOPICS, BASE_CORE_TOPICS, CAPELLA_CORE_TOPICS, LIGHT_CLIENT_GOSSIP_TOPICS,
+    all_topics_at_fork, core_topics_to_subscribe, is_fork_non_core_topic, subnet_from_topic_hash,
+    EnrForkId, ForkContext, GossipEncoding, GossipKind, GossipTopic, SnappyTransform, Subnet,
+    SubnetDiscovery,
 };
 use crate::EnrExt;
 use crate::{metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
@@ -51,7 +51,7 @@ use types::{
     config::Config as ChainConfig,
     nonstandard::Phase,
     phase0::{
-        consts::{AttestationSubnetCount, FAR_FUTURE_EPOCH},
+        consts::AttestationSubnetCount,
         primitives::{ForkDigest, Slot},
     },
     preset::Preset,
@@ -298,23 +298,42 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
 
             // Set up a scoring update interval
             let update_gossipsub_scores = tokio::time::interval(params.decay_interval);
-            let possible_fork_digests = ctx.fork_context.all_fork_digests();
 
-            let blob_sidecar_subnet_count_max =
-                if chain_config.electra_fork_epoch != FAR_FUTURE_EPOCH {
-                    chain_config.blob_sidecar_subnet_count_electra.get()
+            let current_and_future_forks = enum_iterator::all().into_iter().filter_map(|phase| {
+                if phase >= ctx.fork_context.current_fork() {
+                    ctx.fork_context
+                        .to_context_bytes(phase)
+                        .map(|fork_digest| (phase, fork_digest))
                 } else {
-                    chain_config.blob_sidecar_subnet_count.get()
-                };
+                    None
+                }
+            });
 
-            let max_topics = AttestationSubnetCount::USIZE
-                + SyncCommitteeSubnetCount::USIZE
-                + blob_sidecar_subnet_count_max as usize
-                + chain_config.data_column_sidecar_subnet_count as usize
-                + BASE_CORE_TOPICS.len()
-                + ALTAIR_CORE_TOPICS.len()
-                + CAPELLA_CORE_TOPICS.len() // 0 core deneb and electra topics
-                + LIGHT_CLIENT_GOSSIP_TOPICS.len();
+            let all_topics_for_forks = current_and_future_forks
+                .map(|(phase, fork_digest)| {
+                    all_topics_at_fork(&chain_config, phase)
+                        .into_iter()
+                        .map(|topic| {
+                            Topic::new(GossipTopic::new(
+                                topic,
+                                GossipEncoding::default(),
+                                fork_digest,
+                            ))
+                            .into()
+                        })
+                        .collect::<Vec<TopicHash>>()
+                })
+                .collect::<Vec<_>>();
+
+            // For simplicity find the fork with the most individual topics and assume all forks
+            // have the same topic count
+            let max_topics_at_any_fork = all_topics_for_forks
+                .iter()
+                .map(|topics| topics.len())
+                .max()
+                .expect("each fork has at least 5 hardcoded core topics");
+
+            let possible_fork_digests = ctx.fork_context.all_fork_digests();
 
             let filter = gossipsub::MaxCountSubscriptionFilter {
                 filter: utils::create_whitelist_filter(
@@ -324,9 +343,9 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     SyncCommitteeSubnetCount::U64,
                 ),
                 // during a fork we subscribe to both the old and new topics
-                max_subscribed_topics: max_topics * 4,
+                max_subscribed_topics: max_topics_at_any_fork * 4,
                 // 424 in theory = (64 attestation + 4 sync committee + 7 core topics + 9 blob topics + 128 column topics) * 2
-                max_subscriptions_per_request: max_topics * 2,
+                max_subscriptions_per_request: max_topics_at_any_fork * 2,
             };
 
             // If metrics are enabled for libp2p build the configuration
@@ -359,17 +378,9 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             // If we are using metrics, then register which topics we want to make sure to keep
             // track of
             if ctx.libp2p_registry.is_some() {
-                let topics_to_keep_metrics_for = attestation_sync_committee_topics()
-                    .map(|gossip_kind| {
-                        Topic::from(GossipTopic::new(
-                            gossip_kind,
-                            GossipEncoding::default(),
-                            enr_fork_id.fork_digest,
-                        ))
-                        .into()
-                    })
-                    .collect::<Vec<TopicHash>>();
-                gossipsub.register_topics_for_metrics(topics_to_keep_metrics_for);
+                for topics in all_topics_for_forks {
+                    gossipsub.register_topics_for_metrics(topics);
+                }
             }
 
             (gossipsub, update_gossipsub_scores)
@@ -737,38 +748,26 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
 
     /// Subscribe to all required topics for the `phase` with the given `new_fork_digest`.
     pub fn subscribe_new_fork_topics(&mut self, phase: Phase, new_fork_digest: ForkDigest) {
-        // Subscribe to existing topics with new fork digest
+        // Re-subscribe to non-core topics with the new fork digest
         let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
         for mut topic in subscriptions.into_iter() {
-            topic.fork_digest = new_fork_digest;
-            self.subscribe(topic);
+            if is_fork_non_core_topic(&topic, phase) {
+                topic.fork_digest = new_fork_digest;
+                self.subscribe(topic);
+            }
         }
 
         // Subscribe to core topics for the new fork
-        for kind in fork_core_topics(
+        for kind in core_topics_to_subscribe(
             &self.network_globals.config,
-            &phase,
+            phase,
             &self.network_globals.as_topic_config(),
         ) {
             let topic = GossipTopic::new(kind, GossipEncoding::default(), new_fork_digest);
             self.subscribe(topic);
         }
 
-        // TODO(das): unsubscribe from blob topics at the Fulu fork
-
-        // Register the new topics for metrics
-        let topics_to_keep_metrics_for = attestation_sync_committee_topics()
-            .map(|gossip_kind| {
-                Topic::from(GossipTopic::new(
-                    gossip_kind,
-                    GossipEncoding::default(),
-                    new_fork_digest,
-                ))
-                .into()
-            })
-            .collect::<Vec<TopicHash>>();
-        self.gossipsub_mut()
-            .register_topics_for_metrics(topics_to_keep_metrics_for);
+        // Already registered all possible gossipsub topics for metrics
     }
 
     /// Unsubscribe from all topics that doesn't have the given fork_digest
