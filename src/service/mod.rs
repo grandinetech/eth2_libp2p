@@ -745,10 +745,16 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         }
 
         // Subscribe to core topics for the new fork
-        for kind in fork_core_topics(&self.network_globals.config, &phase) {
+        for kind in fork_core_topics(
+            &self.network_globals.config,
+            &phase,
+            &self.network_globals.as_topic_config(),
+        ) {
             let topic = GossipTopic::new(kind, GossipEncoding::default(), new_fork_digest);
             self.subscribe(topic);
         }
+
+        // TODO(das): unsubscribe from blob topics at the Fulu fork
 
         // Register the new topics for metrics
         let topics_to_keep_metrics_for = attestation_sync_committee_topics()
@@ -763,20 +769,6 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             .collect::<Vec<TopicHash>>();
         self.gossipsub_mut()
             .register_topics_for_metrics(topics_to_keep_metrics_for);
-    }
-
-    // Subscribe to sampling data column topics
-    pub fn subscribe_to_data_column_topics(&mut self, fork_digest: ForkDigest) {
-        let data_column_topics = self
-            .network_globals
-            .sampling_subnets
-            .iter()
-            .map(|subnet_id| GossipKind::DataColumnSidecar(*subnet_id))
-            .collect::<Vec<_>>();
-        for kind in data_column_topics {
-            let topic = GossipTopic::new(kind, GossipEncoding::default(), fork_digest);
-            self.subscribe(topic);
-        }
     }
 
     /// Unsubscribe from all topics that doesn't have the given fork_digest

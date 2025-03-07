@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use enum_iterator::previous;
 use gossipsub::{IdentTopic as Topic, TopicHash};
 use serde::{Deserialize, Serialize};
@@ -51,8 +53,18 @@ pub const LIGHT_CLIENT_GOSSIP_TOPICS: [GossipKind; 2] = [
     GossipKind::LightClientOptimisticUpdate,
 ];
 
+#[derive(Debug)]
+pub struct TopicConfig<'a> {
+    pub subscribe_all_data_column_subnets: bool,
+    pub sampling_subnets: &'a HashSet<SubnetId>,
+}
+
 /// Returns the core topics associated with each fork that are new to the previous fork
-pub fn fork_core_topics(chain_config: &ChainConfig, phase: &Phase) -> Vec<GossipKind> {
+pub fn fork_core_topics(
+    chain_config: &ChainConfig,
+    phase: &Phase,
+    topic_config: &TopicConfig,
+) -> Vec<GossipKind> {
     match phase {
         Phase::Phase0 => BASE_CORE_TOPICS.to_vec(),
         Phase::Altair => ALTAIR_CORE_TOPICS.to_vec(),
@@ -79,7 +91,19 @@ pub fn fork_core_topics(chain_config: &ChainConfig, phase: &Phase) -> Vec<Gossip
 
             electra_blob_topics
         }
-        Phase::Fulu => vec![],
+        Phase::Fulu => {
+            let mut topics = vec![];
+            if topic_config.subscribe_all_data_column_subnets {
+                for column_subnet in 0..chain_config.data_column_sidecar_subnet_count {
+                    topics.push(GossipKind::DataColumnSidecar(column_subnet as SubnetId));
+                }
+            } else {
+                for column_subnet in topic_config.sampling_subnets {
+                    topics.push(GossipKind::DataColumnSidecar(*column_subnet));
+                }
+            }
+            topics
+        }
     }
 }
 
@@ -99,10 +123,11 @@ pub fn attestation_sync_committee_topics() -> impl Iterator<Item = GossipKind> {
 pub fn core_topics_to_subscribe(
     chain_config: &ChainConfig,
     mut current_phase: Phase,
+    topic_config: &TopicConfig,
 ) -> Vec<GossipKind> {
-    let mut topics = fork_core_topics(chain_config, &current_phase);
+    let mut topics = fork_core_topics(chain_config, &current_phase, topic_config);
     while let Some(previous_phase) = previous(&current_phase) {
-        let previous_phase_topics = fork_core_topics(chain_config, &previous_phase);
+        let previous_phase_topics = fork_core_topics(chain_config, &previous_phase, topic_config);
         topics.extend(previous_phase_topics);
         current_phase = previous_phase;
     }
@@ -352,6 +377,7 @@ fn subnet_topic_index(topic: &str) -> Option<GossipKind> {
 
 #[cfg(test)]
 mod tests {
+    use enum_iterator::Sequence;
     use types::phase0::primitives::H32;
 
     use super::GossipKind::*;
@@ -478,9 +504,14 @@ mod tests {
     fn test_core_topics_to_subscribe() {
         let chain_config = ChainConfig::mainnet();
         let mut all_topics = Vec::new();
-        let mut deneb_core_topics = fork_core_topics(&chain_config, &Phase::Deneb);
-        let mut electra_core_topics = fork_core_topics(&chain_config, &Phase::Electra);
-        let mut fulu_core_topics = fork_core_topics(&chain_config, &Phase::Fulu);
+        let topic_config = TopicConfig {
+            subscribe_all_data_column_subnets: false,
+            sampling_subnets: &HashSet::from_iter((0..10u64).map(Into::into)),
+        };
+        let mut deneb_core_topics = fork_core_topics(&chain_config, &Phase::Deneb, &topic_config);
+        let mut electra_core_topics =
+            fork_core_topics(&chain_config, &Phase::Electra, &topic_config);
+        let mut fulu_core_topics = fork_core_topics(&chain_config, &Phase::Fulu, &topic_config);
         all_topics.append(&mut fulu_core_topics);
         all_topics.append(&mut electra_core_topics);
         all_topics.append(&mut deneb_core_topics);
@@ -488,7 +519,8 @@ mod tests {
         all_topics.extend(ALTAIR_CORE_TOPICS);
         all_topics.extend(BASE_CORE_TOPICS);
 
-        let core_topics = core_topics_to_subscribe(&chain_config, Phase::Electra);
+        let latest_fork = Phase::last().unwrap_or(Phase::Phase0);
+        let core_topics = core_topics_to_subscribe(&chain_config, latest_fork, &topic_config);
         // Need to check all the topics exist in an order independent manner
         for topic in all_topics {
             assert!(core_topics.contains(&topic));

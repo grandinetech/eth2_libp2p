@@ -1,4 +1,5 @@
 //! A collection of variables that are accessible outside of the network thread itself.
+use super::TopicConfig;
 use crate::peer_manager::peerdb::PeerDB;
 use crate::rpc::{MetaData, MetaDataV3};
 use crate::types::{BackFillState, SyncState};
@@ -187,6 +188,16 @@ impl NetworkGlobals {
             ))
             .cloned()
             .collect::<Vec<_>>()
+    }
+
+    // Returns the TopicConfig to compute the set of Gossip topics for a given fork
+    pub fn as_topic_config(&self) -> TopicConfig {
+        TopicConfig {
+            subscribe_all_data_column_subnets: self
+                .network_config
+                .subscribe_all_data_column_subnets,
+            sampling_subnets: &self.sampling_subnets,
+        }
     }
 
     /// TESTING ONLY. Build a dummy NetworkGlobals instance.
