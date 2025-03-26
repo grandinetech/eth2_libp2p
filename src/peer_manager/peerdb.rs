@@ -698,8 +698,11 @@ impl PeerDB {
     }
 
     /// Updates the connection state. MUST ONLY BE USED IN TESTS.
-    pub fn __add_connected_peer_testing_only(&mut self, supernode: bool) -> PeerId {
-        let enr_key = CombinedKey::generate_secp256k1();
+    pub fn __add_connected_peer_testing_only(
+        &mut self,
+        supernode: bool,
+        enr_key: CombinedKey,
+    ) -> PeerId {
         let mut enr = Enr::builder().build(&enr_key).unwrap();
         let peer_id = enr.peer_id();
 
