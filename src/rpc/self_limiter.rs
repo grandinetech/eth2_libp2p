@@ -37,7 +37,7 @@ pub(crate) struct SelfRateLimiter<Id: ReqId, P: Preset> {
     /// Rate limiter for our own requests.
     limiter: RateLimiter,
     /// Requests that are ready to be sent.
-    ready_requests: SmallVec<[BehaviourAction<Id, P>; 3]>,
+    ready_requests: SmallVec<[(PeerId, RPCSend<Id, P>); 3]>,
     /// Slog logger.
     log: Logger,
 }
@@ -78,7 +78,7 @@ impl<Id: ReqId, P: Preset> SelfRateLimiter<Id, P> {
         peer_id: PeerId,
         request_id: Id,
         req: RequestType<P>,
-    ) -> Result<BehaviourAction<Id, P>, Error> {
+    ) -> Result<RPCSend<Id, P>, Error> {
         let protocol = req.versioned_protocol().protocol();
         // First check that there are not already other requests waiting to be sent.
         if let Some(queued_requests) = self.delayed_requests.get_mut(&(peer_id, protocol)) {
@@ -110,13 +110,9 @@ impl<Id: ReqId, P: Preset> SelfRateLimiter<Id, P> {
         request_id: Id,
         req: RequestType<P>,
         log: &Logger,
-    ) -> Result<BehaviourAction<Id, P>, (QueuedRequest<Id, P>, Duration)> {
+    ) -> Result<RPCSend<Id, P>, (QueuedRequest<Id, P>, Duration)> {
         match limiter.allows(&peer_id, &req) {
-            Ok(()) => Ok(BehaviourAction::NotifyHandler {
-                peer_id,
-                handler: NotifyHandler::Any,
-                event: RPCSend::Request(request_id, req),
-            }),
+            Ok(()) => Ok(RPCSend::Request(request_id, req)),
             Err(e) => {
                 let protocol = req.versioned_protocol();
                 match e {
@@ -128,11 +124,7 @@ impl<Id: ReqId, P: Preset> SelfRateLimiter<Id, P> {
                             "Self rate limiting error for a batch that will never fit. Sending request anyway. Check configuration parameters.";
                             "protocol" => %req.versioned_protocol().protocol()
                         );
-                        Ok(BehaviourAction::NotifyHandler {
-                            peer_id,
-                            handler: NotifyHandler::Any,
-                            event: RPCSend::Request(request_id, req),
-                        })
+                        Ok(RPCSend::Request(request_id, req))
                     }
                     RateLimitedErr::TooSoon(wait_time) => {
                         debug!(log, "Self rate limiting"; "protocol" => %protocol.protocol(), "wait_time_ms" => wait_time.as_millis(), "peer_id" => %peer_id);
@@ -158,7 +150,7 @@ impl<Id: ReqId, P: Preset> SelfRateLimiter<Id, P> {
                         // If one fails just wait for the next window that allows sending requests.
                         return;
                     }
-                    Ok(event) => self.ready_requests.push(event),
+                    Ok(event) => self.ready_requests.push((peer_id, event)),
                 }
             }
             if queued_requests.is_empty() {
@@ -205,8 +197,12 @@ impl<Id: ReqId, P: Preset> SelfRateLimiter<Id, P> {
         let _ = self.limiter.poll_unpin(cx);
 
         // Finally return any queued events.
-        if !self.ready_requests.is_empty() {
-            return Poll::Ready(self.ready_requests.remove(0));
+        if let Some((peer_id, event)) = self.ready_requests.pop() {
+            return Poll::Ready(BehaviourAction::NotifyHandler {
+                peer_id,
+                handler: NotifyHandler::Any,
+                event,
+            });
         }
 
         Poll::Pending
