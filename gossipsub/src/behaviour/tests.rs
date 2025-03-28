@@ -4741,6 +4741,7 @@ fn test_limit_number_of_message_ids_inside_ihave() {
     );
 }
 
+/*
 #[test]
 fn test_iwant_penalties() {
     /*
@@ -4864,6 +4865,7 @@ fn test_iwant_penalties() {
     assert_eq!(single_penalized, 80);
     assert_eq!(double_penalized, 0);
 }
+*/
 
 #[test]
 fn test_publish_to_floodsub_peers_without_flood_publish() {

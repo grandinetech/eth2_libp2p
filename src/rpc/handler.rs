@@ -878,7 +878,7 @@ where
                 }
             }
             RequestType::BlobsByRange(request) => {
-                let max_requested_blobs = request.max_blobs_requested::<P>(phase);
+                let max_requested_blobs = request.max_blobs_requested(&chain_config, phase);
                 let max_allowed = chain_config.max_request_blob_sidecars(phase);
                 if max_requested_blobs > max_allowed {
                     self.events_out.push(HandlerEvent::Err(HandlerErr::Inbound {
@@ -895,7 +895,7 @@ where
             _ => {}
         };
 
-        let max_responses = req.max_responses(self.fork_context.current_fork());
+        let max_responses = req.max_responses(&chain_config, self.fork_context.current_fork());
 
         // store requests that expect responses
         if max_responses > 0 {
@@ -963,8 +963,10 @@ where
                 }));
         }
 
+        let chain_config = &self.fork_context.chain_config();
+
         // add the stream to substreams if we expect a response, otherwise drop the stream.
-        let max_responses = request.max_responses(self.fork_context.current_fork());
+        let max_responses = request.max_responses(&chain_config, self.fork_context.current_fork());
         if max_responses > 0 {
             let max_remaining_chunks = if request.expect_exactly_one_response() {
                 // Currently enforced only for multiple responses

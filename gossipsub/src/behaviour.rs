@@ -2134,11 +2134,12 @@ where
 
     /// Applies penalties to peers that did not respond to our IWANT requests.
     fn apply_iwant_penalties(&mut self) {
-        if let Some((peer_score, ..)) = &mut self.peer_score {
-            for (peer, count) in self.gossip_promises.get_broken_promises() {
+        if let Some((_peer_score, ..)) = &mut self.peer_score {
+            for (peer, _count) in self.gossip_promises.get_broken_promises() {
                 // We do not apply penalties to nodes that have disconnected.
                 if self.connected_peers.contains_key(&peer) {
-                    peer_score.add_penalty(&peer, count);
+                    // temporary disabled due to issues under heavy load
+                    // peer_score.add_penalty(&peer, count);
                     if let Some(metrics) = self.metrics.as_mut() {
                         metrics.register_score_penalty(Penalty::BrokenPromise);
                     }
