@@ -2,7 +2,7 @@ use super::client::Client;
 use super::score::{PeerAction, Score, ScoreState};
 use super::sync_status::SyncStatus;
 use crate::discovery::Eth2Enr;
-use crate::{rpc::MetaData, types::Subnet};
+use crate::{rpc::MetaData, types::{Subnet, PeerState, PeerDirection}};
 use discv5::Enr;
 use libp2p::core::multiaddr::{Multiaddr, Protocol};
 use serde::{
@@ -514,13 +514,22 @@ impl PeerInfo {
 }
 
 /// Connection Direction of connection.
-#[derive(Debug, Clone, Serialize, AsRefStr)]
+#[derive(Debug, Clone, Copy, Serialize, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum ConnectionDirection {
     /// The connection was established by a peer dialing us.
     Incoming,
     /// The connection was established by us dialing a peer.
     Outgoing,
+}
+
+impl From<ConnectionDirection> for PeerDirection {
+    fn from(direction: ConnectionDirection) -> Self {
+        match direction {
+            ConnectionDirection::Incoming => PeerDirection::Inbound,
+            ConnectionDirection::Outgoing => PeerDirection::Outbound,
+        }
+    }
 }
 
 /// Connection Status of the peer.
@@ -613,6 +622,17 @@ impl Serialize for PeerConnectionStatus {
                 s.serialize_field("last_seen", &0)?;
                 s.end()
             }
+        }
+    }
+}
+
+impl From<PeerConnectionStatus> for PeerState {
+    fn from(status: PeerConnectionStatus) -> Self {
+        match status {
+            Connected { .. } => PeerState::Connected,
+            Dialing { .. } => PeerState::Connecting,
+            Disconnecting { .. } => PeerState::Disconnecting,
+            Disconnected { .. } | Banned { .. } | Unknown => PeerState::Disconnected,
         }
     }
 }

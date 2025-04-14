@@ -1,6 +1,7 @@
 mod enr_fork_id;
 mod fork_context;
 mod globals;
+mod grandine;
 mod pubsub;
 mod subnet;
 mod sync_state;
@@ -17,6 +18,7 @@ pub type Enr = discv5::enr::Enr<discv5::enr::CombinedKey>;
 pub use enr_fork_id::EnrForkId;
 pub use fork_context::ForkContext;
 pub use globals::NetworkGlobals;
+pub use grandine::{PeerDirection, PeerState};
 pub use pubsub::{PubsubMessage, SnappyTransform};
 pub use subnet::{Subnet, SubnetDiscovery};
 pub use sync_state::{BackFillState, SyncState};
