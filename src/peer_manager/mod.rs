@@ -110,6 +110,7 @@ pub struct PeerManager {
     metrics_enabled: bool,
     /// Keeps track of whether the QUIC protocol is enabled or not.
     quic_enabled: bool,
+    trusted_peers: HashSet<Enr>,
     /// The logger associated with the `PeerManager`.
     log: slog::Logger,
 }
@@ -175,6 +176,7 @@ impl PeerManager {
             discovery_enabled,
             metrics_enabled,
             quic_enabled,
+            trusted_peers: Default::default(),
             log: log.clone(),
         })
     }
@@ -859,7 +861,7 @@ impl PeerManager {
     }
 
     // Gracefully disconnects a peer without banning them.
-    fn disconnect_peer(&mut self, peer_id: PeerId, reason: GoodbyeReason) {
+    pub fn disconnect_peer(&mut self, peer_id: PeerId, reason: GoodbyeReason) {
         self.events
             .push(PeerManagerEvent::DisconnectPeer(peer_id, reason));
         self.network_globals
@@ -905,6 +907,13 @@ impl PeerManager {
             );
             self.events
                 .push(PeerManagerEvent::DiscoverSubnetPeers(subnets_to_discover));
+        }
+    }
+
+    fn maintain_trusted_peers(&mut self) {
+        let trusted_peers = self.trusted_peers.clone();
+        for trusted_peer in trusted_peers {
+            self.dial_peer(trusted_peer);
         }
     }
 
@@ -1197,6 +1206,7 @@ impl PeerManager {
     fn heartbeat(&mut self) {
         // Optionally run a discovery query if we need more peers.
         self.maintain_peer_count(0);
+        self.maintain_trusted_peers();
 
         // Cleans up the connection state of dialing peers.
         // Libp2p dials peer-ids, but sometimes the response is from another peer-id or libp2p
@@ -1445,6 +1455,14 @@ impl PeerManager {
             });
 
         Ok(custody_subnets)
+    }
+
+    pub fn add_trusted_peer(&mut self, enr: Enr) {
+        self.trusted_peers.insert(enr);
+    }
+
+    pub fn remove_trusted_peer(&mut self, enr: Enr) {
+        self.trusted_peers.remove(&enr);
     }
 }
 
