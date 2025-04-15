@@ -10,13 +10,11 @@ use std::sync::Arc;
 use std_ext::ArcExt as _;
 use types::{config::Config as ChainConfig, nonstandard::Phase, preset::Preset};
 
-type ReqId = usize;
-
 use tempfile::Builder as TempBuilder;
-pub struct Libp2pInstance<P: Preset>(LibP2PService<ReqId, P>);
+pub struct Libp2pInstance<P: Preset>(LibP2PService<P>);
 
 impl<P: Preset> std::ops::Deref for Libp2pInstance<P> {
-    type Target = LibP2PService<ReqId, P>;
+    type Target = LibP2PService<P>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -87,7 +85,7 @@ pub async fn build_libp2p_instance<P: Preset>(
 }
 
 #[allow(dead_code)]
-pub fn get_enr<P: Preset>(node: &LibP2PService<ReqId, P>) -> Enr {
+pub fn get_enr<P: Preset>(node: &LibP2PService<P>) -> Enr {
     node.local_enr()
 }
 

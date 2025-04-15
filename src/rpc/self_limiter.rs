@@ -215,7 +215,7 @@ mod tests {
     use crate::rpc::rate_limiter::Quota;
     use crate::rpc::self_limiter::SelfRateLimiter;
     use crate::rpc::{Ping, Protocol, RequestType};
-    use crate::service::api_types::RequestId;
+    use crate::service::api_types::AppRequestId;
     use crate::types::ForkContext;
     use libp2p::PeerId;
     use slog::{o, Drain};
@@ -246,14 +246,14 @@ mod tests {
         });
         let chain_config = Arc::new(Config::mainnet().rapid_upgrade());
         let fork_context = Arc::new(ForkContext::dummy::<Mainnet>(&chain_config, Phase::Phase0));
-        let mut limiter: SelfRateLimiter<RequestId<u64>, Mainnet> =
+        let mut limiter: SelfRateLimiter<AppRequestId, Mainnet> =
             SelfRateLimiter::new(config, fork_context, log).unwrap();
         let peer_id = PeerId::random();
 
         for i in 1..=5 {
             let _ = limiter.allows(
                 peer_id,
-                RequestId::Application(i),
+                AppRequestId::Application(i),
                 RequestType::Ping(Ping { data: i as u64 }),
             );
         }
@@ -268,7 +268,7 @@ mod tests {
             // Check that requests in the queue are ordered in the sequence 2, 3, 4, 5.
             let mut iter = queue.iter();
             for i in 2..=5 {
-                assert_eq!(iter.next().unwrap().request_id, RequestId::Application(i));
+                assert_eq!(iter.next().unwrap().request_id, AppRequestId::Application(i));
             }
 
             assert_eq!(limiter.ready_requests.len(), 0);
@@ -288,7 +288,7 @@ mod tests {
             // Check that requests in the queue are ordered in the sequence 3, 4, 5.
             let mut iter = queue.iter();
             for i in 3..=5 {
-                assert_eq!(iter.next().unwrap().request_id, RequestId::Application(i));
+                assert_eq!(iter.next().unwrap().request_id, AppRequestId::Application(i));
             }
 
             assert_eq!(limiter.ready_requests.len(), 1);

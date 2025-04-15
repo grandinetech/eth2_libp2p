@@ -4,8 +4,7 @@
 use super::methods::{GoodbyeReason, RpcErrorResponse, RpcResponse};
 use super::outbound::OutboundRequestContainer;
 use super::protocol::{InboundOutput, Protocol, RPCError, RPCProtocol, RequestType};
-use super::RequestId;
-use super::{RPCReceived, RPCSend, ReqId, Request};
+use super::{RPCReceived, RPCSend, ReqId};
 use crate::rpc::outbound::OutboundFramed;
 use crate::rpc::protocol::InboundFramed;
 use crate::types::ForkContext;
@@ -16,7 +15,8 @@ use libp2p::swarm::handler::{
     ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, DialUpgradeError,
     FullyNegotiatedInbound, FullyNegotiatedOutbound, StreamUpgradeError, SubstreamProtocol,
 };
-use libp2p::swarm::Stream;
+use libp2p::swarm::{ConnectionId, Stream};
+use libp2p::PeerId;
 use slog::{crit, debug, trace};
 use smallvec::SmallVec;
 use std::{
@@ -90,6 +90,12 @@ pub struct RPCHandler<Id, P>
 where
     P: Preset,
 {
+    /// The PeerId matching this `ConnectionHandler`.
+    peer_id: PeerId,
+
+    /// The ConnectionId matching this `ConnectionHandler`.
+    connection_id: ConnectionId,
+
     /// The upgrade for inbound substreams.
     listen_protocol: SubstreamProtocol<RPCProtocol<P>, ()>,
 
@@ -224,8 +230,12 @@ where
         fork_context: Arc<ForkContext>,
         log: &slog::Logger,
         resp_timeout: Duration,
+        peer_id: PeerId,
+        connection_id: ConnectionId,
     ) -> Self {
         RPCHandler {
+            connection_id,
+            peer_id,
             listen_protocol,
             events_out: SmallVec::new(),
             dial_queue: SmallVec::new(),
@@ -251,7 +261,7 @@ where
     fn shutdown(&mut self, goodbye_reason: Option<(Id, GoodbyeReason)>) {
         if matches!(self.state, HandlerState::Active) {
             if !self.dial_queue.is_empty() {
-                debug!(self.log, "Starting handler shutdown"; "unsent_queued_requests" => self.dial_queue.len());
+                debug!(self.log, "Starting handler shutdown"; "unsent_queued_requests" => self.dial_queue.len(), "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
             }
             // We now drive to completion communications already dialed/established
             while let Some((id, req)) = self.dial_queue.pop() {
@@ -298,8 +308,7 @@ where
         let Some(inbound_info) = self.inbound_substreams.get_mut(&inbound_id) else {
             if !matches!(response, RpcResponse::StreamTermination(..)) {
                 // the stream is closed after sending the expected number of responses
-                trace!(self.log, "Inbound stream has expired. Response not sent";
-                    "response" => %response, "id" => inbound_id);
+                trace!(self.log, "Inbound stream has expired. Response not sent"; "response" => %response, "id" => inbound_id, "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
             }
             return;
         };
@@ -314,8 +323,7 @@ where
 
         if matches!(self.state, HandlerState::Deactivated) {
             // we no longer send responses after the handler is deactivated
-            debug!(self.log, "Response not sent. Deactivated handler";
-                "response" => %response, "id" => inbound_id);
+            debug!(self.log, "Response not sent. Deactivated handler"; "response" => %response, "id" => inbound_id, "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
             return;
         }
         inbound_info.pending_items.push_back(response);
@@ -382,7 +390,9 @@ where
             match delay.as_mut().poll(cx) {
                 Poll::Ready(_) => {
                     self.state = HandlerState::Deactivated;
-                    debug!(self.log, "Shutdown timeout elapsed, Handler deactivated");
+
+                    debug!(self.log, "Shutdown timeout elapsed, Handler deactivated"; "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
+
                     return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
                         HandlerEvent::Close(RPCError::Disconnected),
                     ));
@@ -429,7 +439,7 @@ where
                     outbound_err,
                 )));
             } else {
-                crit!(self.log, "timed out substream not in the books"; "stream_id" => outbound_id.get_ref());
+                crit!(self.log, "timed out substream not in the books"; "stream_id" => outbound_id.get_ref(), "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
             }
         }
 
@@ -554,11 +564,9 @@ where
                                 if let Some(ref delay_key) = info.delay_key {
                                     self.inbound_substreams_delay.remove(delay_key);
                                 }
-
-                                // BlocksByRange is the one that typically consumes the most time.
                                 // Its useful to log when the request was completed.
                                 if matches!(info.protocol, Protocol::BlocksByRange) {
-                                    debug!(self.log, "BlocksByRange Response sent"; "duration" => Instant::now().duration_since(info.request_start_time).as_secs());
+                                    debug!(self.log, "BlocksByRange Response sent"; "duration" => Instant::now().duration_since(info.request_start_time).as_secs(), "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
                                 }
                                 if matches!(info.protocol, Protocol::BlobsByRange) {
                                     debug!(self.log, "BlobsByRange Response sent"; "duration" => Instant::now().duration_since(info.request_start_time).as_secs());
@@ -584,10 +592,10 @@ where
                                 }));
 
                                 if matches!(info.protocol, Protocol::BlocksByRange) {
-                                    debug!(self.log, "BlocksByRange Response failed"; "duration" => info.request_start_time.elapsed().as_secs());
+                                    debug!(self.log, "BlocksByRange Response failed"; "duration" => info.request_start_time.elapsed().as_secs(), "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
                                 }
                                 if matches!(info.protocol, Protocol::BlobsByRange) {
-                                    debug!(self.log, "BlobsByRange Response failed"; "duration" => info.request_start_time.elapsed().as_secs());
+                                    debug!(self.log, "BlobsByRange Response failed"; "duration" => info.request_start_time.elapsed().as_secs(), "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
                                 }
                                 break;
                             }
@@ -773,7 +781,7 @@ where
                     }
                 }
                 OutboundSubstreamState::Poisoned => {
-                    crit!(self.log, "Poisoned outbound substream");
+                    crit!(self.log, "Poisoned outbound substream"; "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
                     unreachable!("Coding Error: Outbound substream is poisoned")
                 }
             }
@@ -805,7 +813,7 @@ where
                 && self.events_out.is_empty()
                 && self.dial_negotiated == 0
             {
-                debug!(self.log, "Goodbye sent, Handler deactivated");
+                debug!(self.log, "Goodbye sent, Handler deactivated"; "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
                 self.state = HandlerState::Deactivated;
                 return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
                     HandlerEvent::Close(RPCError::Disconnected),
@@ -933,12 +941,13 @@ where
             self.shutdown(None);
         }
 
-        self.events_out
-            .push(HandlerEvent::Ok(RPCReceived::Request(Request {
-                id: RequestId::next(),
+        self.events_out.push(HandlerEvent::Ok(RPCReceived::Request(
+            super::InboundRequestId {
+                connection_id: self.connection_id,
                 substream_id: self.current_inbound_substream_id,
-                r#type: req,
-            })));
+            },
+            req,
+        )));
         self.current_inbound_substream_id.0 += 1;
     }
 
@@ -996,7 +1005,7 @@ where
                 )
                 .is_some()
             {
-                crit!(self.log, "Duplicate outbound substream id"; "id" => self.current_outbound_substream_id);
+                crit!(self.log, "Duplicate outbound substream id"; "id" => self.current_outbound_substream_id, "peer_id" => %self.peer_id, "connection_id" => %self.connection_id);
             }
             self.current_outbound_substream_id.0 += 1;
         }

@@ -1,6 +1,6 @@
+use crate::rpc::methods::{ResponseTermination, RpcResponse, RpcSuccessResponse, StatusMessage};
 use std::sync::Arc;
 
-use libp2p::swarm::ConnectionId;
 use types::{
     combined::{
         LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
@@ -11,18 +11,10 @@ use types::{
     preset::Preset,
 };
 
-use crate::rpc::{
-    methods::{ResponseTermination, RpcResponse, RpcSuccessResponse, StatusMessage},
-    SubstreamId,
-};
-
-/// Identifier of requests sent by a peer.
-pub type PeerRequestId = (ConnectionId, SubstreamId);
-
 /// Identifier of a request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RequestId<AppReqId> {
-    Application(AppReqId),
+pub enum AppRequestId {
+    Application(usize),
     Internal,
 }
 
@@ -101,22 +93,6 @@ impl<P: Preset> std::convert::From<Response<P>> for RpcResponse<P> {
                     RpcResponse::StreamTermination(ResponseTermination::LightClientUpdatesByRange)
                 }
             },
-        }
-    }
-}
-
-impl<AppReqId: std::fmt::Debug> slog::Value for RequestId<AppReqId> {
-    fn serialize(
-        &self,
-        record: &slog::Record,
-        key: slog::Key,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        match self {
-            RequestId::Internal => slog::Value::serialize("Behaviour", record, key, serializer),
-            RequestId::Application(ref id) => {
-                slog::Value::serialize(&format_args!("{:?}", id), record, key, serializer)
-            }
         }
     }
 }
