@@ -851,17 +851,8 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
         // unsubscribe from the topic
         let libp2p_topic: Topic = topic.clone().into();
 
-        match self.gossipsub_mut().unsubscribe(&libp2p_topic) {
-            Err(_) => {
-                warn!(self.log, "Failed to unsubscribe from topic"; "topic" => %libp2p_topic);
-                false
-            }
-            Ok(v) => {
-                // Inform the network
-                debug!(self.log, "Unsubscribed to topic"; "topic" => %topic);
-                v
-            }
-        }
+        debug!(self.log, "Unsubscribed to topic"; "topic" => %topic);
+        self.gossipsub_mut().unsubscribe(&libp2p_topic)
     }
 
     /// Publishes message on the pubsub (gossipsub) behaviour, choosing the encoding.
@@ -911,7 +902,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     }
                 }
 
-                if let PublishError::InsufficientPeers = e {
+                if let PublishError::NoPeersSubscribedToTopic = e {
                     self.gossip_cache.insert(topic, message_data);
                 }
             }
@@ -945,13 +936,11 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             }
         }
 
-        if let Err(e) = self.gossipsub_mut().report_message_validation_result(
+        self.gossipsub_mut().report_message_validation_result(
             &message_id,
             propagation_source,
             validation_result,
-        ) {
-            warn!(self.log, "Failed to report message validation"; "message_id" => %message_id, "peer_id" => %propagation_source, "error" => ?e);
-        }
+        );
     }
 
     /// Updates the current gossipsub scoring parameters based on the validator count and current
@@ -1294,13 +1283,11 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
                     Err(e) => {
                         debug!(self.log, "Could not decode gossipsub message"; "topic" => ?gs_msg.topic,"error" => e);
                         //reject the message
-                        if let Err(e) = self.gossipsub_mut().report_message_validation_result(
+                        self.gossipsub_mut().report_message_validation_result(
                             &id,
                             &propagation_source,
                             MessageAcceptance::Reject,
-                        ) {
-                            warn!(self.log, "Failed to report message validation"; "message_id" => %id, "peer_id" => %propagation_source, "error" => ?e);
-                        }
+                        );
                     }
                     Ok(msg) => {
                         // Notify the network
@@ -1395,7 +1382,7 @@ impl<AppReqId: ReqId, P: Preset> Network<AppReqId, P> {
             } => {
                 debug!(self.log, "Slow gossipsub peer"; "peer_id" => %peer_id, "publish" => failed_messages.publish, "forward" => failed_messages.forward, "priority" => failed_messages.priority, "non_priority" => failed_messages.non_priority);
                 // Punish the peer if it cannot handle priority messages
-                if failed_messages.total_timeout() > 10 {
+                if failed_messages.timeout > 10 {
                     debug!(self.log, "Slow gossipsub peer penalized for priority failure"; "peer_id" => %peer_id);
                     self.peer_manager_mut().report_peer(
                         &peer_id,

@@ -56,7 +56,6 @@ try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 unsigned-varint = { workspace = true }
-void = { workspace = true }
 
 [dev-dependencies]
 async-std = { version = '1.6.3', features = ["unstable"] }
