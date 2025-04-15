@@ -2,7 +2,10 @@ use super::client::Client;
 use super::score::{PeerAction, Score, ScoreState};
 use super::sync_status::SyncStatus;
 use crate::discovery::Eth2Enr;
-use crate::{rpc::MetaData, types::{Subnet, PeerState, PeerDirection}};
+use crate::{
+    rpc::MetaData,
+    types::{PeerDirection, PeerState, Subnet},
+};
 use discv5::Enr;
 use libp2p::core::multiaddr::{Multiaddr, Protocol};
 use serde::{

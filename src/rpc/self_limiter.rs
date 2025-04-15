@@ -268,7 +268,10 @@ mod tests {
             // Check that requests in the queue are ordered in the sequence 2, 3, 4, 5.
             let mut iter = queue.iter();
             for i in 2..=5 {
-                assert_eq!(iter.next().unwrap().request_id, AppRequestId::Application(i));
+                assert_eq!(
+                    iter.next().unwrap().request_id,
+                    AppRequestId::Application(i)
+                );
             }
 
             assert_eq!(limiter.ready_requests.len(), 0);
@@ -288,7 +291,10 @@ mod tests {
             // Check that requests in the queue are ordered in the sequence 3, 4, 5.
             let mut iter = queue.iter();
             for i in 3..=5 {
-                assert_eq!(iter.next().unwrap().request_id, AppRequestId::Application(i));
+                assert_eq!(
+                    iter.next().unwrap().request_id,
+                    AppRequestId::Application(i)
+                );
             }
 
             assert_eq!(limiter.ready_requests.len(), 1);

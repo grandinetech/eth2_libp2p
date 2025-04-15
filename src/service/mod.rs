@@ -1704,10 +1704,7 @@ impl<P: Preset> Network<P> {
     }
 
     /// Handle an identify event.
-    fn inject_identify_event(
-        &mut self,
-        event: identify::Event,
-    ) -> Option<NetworkEvent<P>> {
+    fn inject_identify_event(&mut self, event: identify::Event) -> Option<NetworkEvent<P>> {
         match event {
             identify::Event::Received {
                 peer_id,

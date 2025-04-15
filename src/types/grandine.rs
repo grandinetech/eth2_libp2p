@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionDirection, PeerConnectionStatus};
 
@@ -18,7 +18,6 @@ impl From<&ConnectionDirection> for PeerDirection {
         }
     }
 }
-
 
 #[derive(PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
