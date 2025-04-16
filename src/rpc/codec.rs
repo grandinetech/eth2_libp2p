@@ -2116,6 +2116,8 @@ mod tests {
     /// sends a valid message filled with a stream of useless padding before the actual message.
     #[test]
     fn test_decode_malicious_v1_message() {
+        let config = Arc::new(Config::mainnet().rapid_upgrade());
+
         // 10 byte snappy stream identifier
         let stream_identifier: &'static [u8] = b"\xFF\x06\x00\x00sNaPpY";
 
@@ -2144,7 +2146,7 @@ mod tests {
 
         // Insert length-prefix
         uvi_codec
-            .encode(status_message_bytes.len(), &mut dst)
+            .encode(config.max_payload_size + 1, &mut dst)
             .unwrap();
 
         // Insert snappy stream identifier

@@ -245,7 +245,7 @@ impl<P: Preset> Network<P> {
 
         let gossipsub_config_params = GossipsubConfigParams {
             message_domain_valid_snappy: chain_config.message_domain_valid_snappy.into(),
-            gossip_max_size: chain_config.max_payload_size,
+            gossipsub_max_transmit_size: chain_config.max_message_size(),
         };
 
         let gs_config = gossipsub_config(
@@ -343,7 +343,11 @@ impl<P: Preset> Network<P> {
                 )
             });
 
-            let snappy_transform = SnappyTransform::new(gs_config.max_transmit_size());
+            let snappy_transform = SnappyTransform::new(
+                chain_config.max_payload_size,
+                chain_config.max_payload_size_compressed(),
+            );
+
             let mut gossipsub = Gossipsub::new_with_subscription_filter_and_transform(
                 MessageAuthenticity::Anonymous,
                 gs_config.clone(),
@@ -382,7 +386,7 @@ impl<P: Preset> Network<P> {
         };
 
         let network_params = NetworkParams {
-            max_chunk_size: chain_config.max_payload_size,
+            max_payload_size: chain_config.max_payload_size,
             ttfb_timeout: Duration::from_secs(chain_config.ttfb_timeout),
             resp_timeout: Duration::from_secs(chain_config.resp_timeout),
         };

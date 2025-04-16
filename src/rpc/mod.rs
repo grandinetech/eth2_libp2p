@@ -139,7 +139,7 @@ pub struct RPCMessage<Id, P: Preset> {
 type BehaviourAction<Id, P> = ToSwarm<RPCMessage<Id, P>, RPCSend<Id, P>>;
 
 pub struct NetworkParams {
-    pub max_chunk_size: usize,
+    pub max_payload_size: usize,
     pub ttfb_timeout: Duration,
     pub resp_timeout: Duration,
 }
@@ -283,7 +283,7 @@ where
             RPCProtocol {
                 chain_config: self.chain_config.clone_arc(),
                 fork_context: self.fork_context.clone(),
-                max_rpc_size: self.network_params.max_chunk_size,
+                max_rpc_size: self.chain_config.max_payload_size,
                 enable_light_client_server: self.enable_light_client_server,
                 phantom: PhantomData,
                 ttfb_timeout: self.network_params.ttfb_timeout,
@@ -317,7 +317,7 @@ where
             RPCProtocol {
                 chain_config: self.chain_config.clone_arc(),
                 fork_context: self.fork_context.clone(),
-                max_rpc_size: self.network_params.max_chunk_size,
+                max_rpc_size: self.chain_config.max_payload_size,
                 enable_light_client_server: self.enable_light_client_server,
                 phantom: PhantomData,
                 ttfb_timeout: self.network_params.ttfb_timeout,

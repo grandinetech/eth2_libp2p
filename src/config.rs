@@ -24,7 +24,7 @@ pub const DEFAULT_IDONTWANT_MESSAGE_SIZE_THRESHOLD: usize = 1000usize;
 
 pub struct GossipsubConfigParams {
     pub message_domain_valid_snappy: [u8; 4],
-    pub gossip_max_size: usize,
+    pub gossipsub_max_transmit_size: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -501,7 +501,7 @@ pub fn gossipsub_config(
     let duplicate_cache_time = Duration::from_secs(slots_per_epoch * seconds_per_slot * 2);
 
     gossipsub::ConfigBuilder::default()
-        .max_transmit_size(gossipsub_config_params.gossip_max_size)
+        .max_transmit_size(gossipsub_config_params.gossipsub_max_transmit_size)
         .heartbeat_interval(load.heartbeat_interval)
         .mesh_n(load.mesh_n)
         .mesh_n_low(load.mesh_n_low)
