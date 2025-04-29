@@ -14,7 +14,6 @@ use strum::IntoStaticStr;
 use try_from_iterator::TryFromIterator as _;
 use typenum::{Unsigned as _, U256};
 use types::deneb::containers::BlobIdentifier;
-use types::eip7594::NumberOfColumns;
 use types::nonstandard::Phase;
 use types::{
     combined::{
@@ -23,7 +22,11 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar},
+    fulu::{
+        consts::NumberOfColumns,
+        containers::{DataColumnIdentifier, DataColumnSidecar},
+        primitives::ColumnIndex,
+    },
     phase0::primitives::{Epoch, ForkDigest, Slot, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -198,10 +201,10 @@ impl MetaData {
         }
     }
 
-    pub fn custody_subnet_count(&self) -> Option<u64> {
+    pub fn custody_group_count(&self) -> Option<u64> {
         match self {
             Self::V1(_) | Self::V2(_) => None,
-            Self::V3(meta_data) => Some(meta_data.custody_subnet_count),
+            Self::V3(meta_data) => Some(meta_data.custody_group_count),
         }
     }
 }
@@ -238,7 +241,8 @@ pub struct MetaDataV3 {
     pub attnets: EnrAttestationBitfield,
     /// The persistent sync committee bitfield.
     pub syncnets: EnrSyncCommitteeBitfield,
-    pub custody_subnet_count: u64,
+    /// The node's custody group count.
+    pub custody_group_count: u64,
 }
 
 impl MetaData {
@@ -281,13 +285,13 @@ impl MetaData {
                 seq_number: metadata.seq_number,
                 attnets: metadata.attnets.clone(),
                 syncnets: Default::default(),
-                custody_subnet_count: chain_config.custody_requirement,
+                custody_group_count: chain_config.custody_requirement,
             }),
             MetaData::V2(metadata) => MetaData::V3(MetaDataV3 {
                 seq_number: metadata.seq_number,
                 attnets: metadata.attnets.clone(),
                 syncnets: metadata.syncnets.clone(),
-                custody_subnet_count: chain_config.custody_requirement,
+                custody_group_count: chain_config.custody_requirement,
             }),
             md @ MetaData::V3(_) => md.clone(),
         }
@@ -450,7 +454,7 @@ pub struct DataColumnsByRangeRequest {
     /// The number of slots from the start slot.
     pub count: u64,
     /// The list column indices being requested.
-    pub columns: ContiguousList<ColumnIndex, NumberOfColumns>,
+    pub columns: Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
 }
 
 impl DataColumnsByRangeRequest {
@@ -462,7 +466,7 @@ impl DataColumnsByRangeRequest {
         Ok(DataColumnsByRangeRequest {
             start_slot: 0,
             count: 0,
-            columns: ContiguousList::try_from(vec![0])?,
+            columns: Arc::new(ContiguousList::try_from(vec![0])?),
         }
         .to_ssz()?
         .len())
@@ -472,7 +476,7 @@ impl DataColumnsByRangeRequest {
         Ok(DataColumnsByRangeRequest {
             start_slot: 0,
             count: 0,
-            columns: ContiguousList::full(0),
+            columns: Arc::new(ContiguousList::full(0)),
         }
         .to_ssz()?
         .len())
@@ -1029,6 +1033,18 @@ impl std::fmt::Display for DataColumnsByRootRequest {
             f,
             "Request: DataColumnsByRoot: Number of Requested Data Column Ids: {}",
             self.data_column_ids.len()
+        )
+    }
+}
+
+impl std::fmt::Display for DataColumnsByRangeRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Request: DataColumnsByRange: Start Slot: {}, Count: {}, Number of Requested Columns Ids: {}",
+            self.start_slot,
+            self.count,
+            self.columns.len()
         )
     }
 }
