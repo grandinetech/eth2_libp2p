@@ -184,7 +184,7 @@ pub fn strip_peer_id(addr: &mut Multiaddr) {
 /// Load metadata from persisted file. Return default metadata if loading fails.
 pub fn load_or_build_metadata(
     network_dir: Option<&Path>,
-    custody_subnet_count: Option<u64>,
+    custody_group_count_opt: Option<u64>,
     log: &slog::Logger,
 ) -> MetaData {
     // We load a V2 metadata version by default (regardless of current fork)
@@ -238,12 +238,12 @@ pub fn load_or_build_metadata(
     }
 
     // Wrap the MetaData
-    let meta_data = if let Some(custody_count) = custody_subnet_count {
+    let meta_data = if let Some(custody_group_count) = custody_group_count_opt {
         MetaData::V3(MetaDataV3 {
             attnets: meta_data.attnets,
             seq_number: meta_data.seq_number,
             syncnets: meta_data.syncnets,
-            custody_subnet_count: custody_count,
+            custody_group_count,
         })
     } else {
         MetaData::V2(meta_data)
@@ -310,8 +310,8 @@ pub(crate) fn save_metadata_to_disk(dir: Option<&Path>, metadata: MetaData, log:
 
     let write_to_disk = || -> Result<()> {
         // We always store the metadata v2 to disk because
-        // custody_subnet_count parameter doesn't need to be persisted across runs.
-        // custody_subnet_count is what the user sets it for the current run.
+        // custody_group_count parameter doesn't need to be persisted across runs.
+        // custody_group_count is what the user sets it for the current run.
         // This is to prevent ugly branching logic when reading the metadata from disk.
         let ssz_bytes = metadata.metadata_v2().to_ssz()?;
 

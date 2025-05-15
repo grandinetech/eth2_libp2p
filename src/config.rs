@@ -463,7 +463,12 @@ pub fn gossipsub_config(
         match fork_context.current_fork() {
             // according to: https://github.com/ethereum/consensus-specs/blob/dev/specs/merge/p2p-interface.md#the-gossip-domain-gossipsub
             // the derivation of the message-id remains the same in the merge
-            Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb | Phase::Electra => {
+            Phase::Altair
+            | Phase::Bellatrix
+            | Phase::Capella
+            | Phase::Deneb
+            | Phase::Electra
+            | Phase::Fulu => {
                 let topic_len_bytes = topic_bytes.len().to_le_bytes();
                 let mut vec = Vec::with_capacity(
                     prefix.len() + topic_len_bytes.len() + topic_bytes.len() + message.data.len(),

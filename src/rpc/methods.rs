@@ -1,4 +1,5 @@
 //! Available RPC methods types and ids.
+use std::collections::HashSet;
 use std::fmt::Display;
 
 use crate::types::{EnrAttestationBitfield, EnrSyncCommitteeBitfield};
@@ -14,7 +15,6 @@ use strum::IntoStaticStr;
 use try_from_iterator::TryFromIterator as _;
 use typenum::{Unsigned as _, U256};
 use types::deneb::containers::BlobIdentifier;
-use types::eip7594::NumberOfColumns;
 use types::nonstandard::Phase;
 use types::{
     combined::{
@@ -23,7 +23,11 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    eip7594::{ColumnIndex, DataColumnIdentifier, DataColumnSidecar},
+    fulu::{
+        consts::NumberOfColumns,
+        containers::{DataColumnSidecar, DataColumnsByRootIdentifier},
+        primitives::ColumnIndex,
+    },
     phase0::primitives::{Epoch, ForkDigest, Slot, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -198,10 +202,10 @@ impl MetaData {
         }
     }
 
-    pub fn custody_subnet_count(&self) -> Option<u64> {
+    pub fn custody_group_count(&self) -> Option<u64> {
         match self {
             Self::V1(_) | Self::V2(_) => None,
-            Self::V3(meta_data) => Some(meta_data.custody_subnet_count),
+            Self::V3(meta_data) => Some(meta_data.custody_group_count),
         }
     }
 }
@@ -238,7 +242,8 @@ pub struct MetaDataV3 {
     pub attnets: EnrAttestationBitfield,
     /// The persistent sync committee bitfield.
     pub syncnets: EnrSyncCommitteeBitfield,
-    pub custody_subnet_count: u64,
+    /// The node's custody group count.
+    pub custody_group_count: u64,
 }
 
 impl MetaData {
@@ -281,13 +286,13 @@ impl MetaData {
                 seq_number: metadata.seq_number,
                 attnets: metadata.attnets.clone(),
                 syncnets: Default::default(),
-                custody_subnet_count: chain_config.custody_requirement,
+                custody_group_count: chain_config.custody_requirement,
             }),
             MetaData::V2(metadata) => MetaData::V3(MetaDataV3 {
                 seq_number: metadata.seq_number,
                 attnets: metadata.attnets.clone(),
                 syncnets: metadata.syncnets.clone(),
-                custody_subnet_count: chain_config.custody_requirement,
+                custody_group_count: chain_config.custody_requirement,
             }),
             md @ MetaData::V3(_) => md.clone(),
         }
@@ -367,7 +372,10 @@ pub struct BlobsByRangeRequest {
 
 impl BlobsByRangeRequest {
     pub fn max_blobs_requested(&self, config: &ChainConfig, phase: Phase) -> u64 {
-        self.count.saturating_mul(phase.max_blobs_per_block(config))
+        let max_blobs_per_block = phase
+            .max_blobs_per_block(config.fork_epoch(phase), config)
+            .expect("blob schedule is not defined.");
+        self.count.saturating_mul(max_blobs_per_block)
     }
 }
 
@@ -450,7 +458,7 @@ pub struct DataColumnsByRangeRequest {
     /// The number of slots from the start slot.
     pub count: u64,
     /// The list column indices being requested.
-    pub columns: ContiguousList<ColumnIndex, NumberOfColumns>,
+    pub columns: Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
 }
 
 impl DataColumnsByRangeRequest {
@@ -462,7 +470,7 @@ impl DataColumnsByRangeRequest {
         Ok(DataColumnsByRangeRequest {
             start_slot: 0,
             count: 0,
-            columns: ContiguousList::try_from(vec![0])?,
+            columns: Arc::new(ContiguousList::try_from(vec![0])?),
         }
         .to_ssz()?
         .len())
@@ -472,7 +480,7 @@ impl DataColumnsByRangeRequest {
         Ok(DataColumnsByRangeRequest {
             start_slot: 0,
             count: 0,
-            columns: ContiguousList::full(0),
+            columns: Arc::new(ContiguousList::full(0)),
         }
         .to_ssz()?
         .len())
@@ -660,31 +668,24 @@ impl BlobsByRootRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DataColumnsByRootRequest {
     /// The list of beacon block roots and column indices being requested.
-    pub data_column_ids: DynamicList<DataColumnIdentifier>,
+    pub data_column_ids: DynamicList<DataColumnsByRootIdentifier>,
 }
 
 impl DataColumnsByRootRequest {
     pub fn new(
         config: &ChainConfig,
-        data_column_identifiers: impl Iterator<Item = DataColumnIdentifier>,
+        data_column_identifiers: impl Iterator<Item = DataColumnsByRootIdentifier>,
     ) -> Self {
         let data_column_ids = DynamicList::from_iter_with_maximum(
             data_column_identifiers,
-            config.max_request_data_column_sidecars as usize,
+            config.max_request_blocks_deneb as usize,
         );
 
         Self { data_column_ids }
     }
 
-    pub fn group_by_ordered_block_root(&self) -> Vec<(H256, Vec<ColumnIndex>)> {
-        let mut column_indexes_by_block = BTreeMap::<H256, Vec<ColumnIndex>>::new();
-        for request_id in self.data_column_ids.as_ref() {
-            column_indexes_by_block
-                .entry(request_id.block_root)
-                .or_default()
-                .push(request_id.index);
-        }
-        column_indexes_by_block.into_iter().collect()
+    pub fn max_requested(&self) -> usize {
+        self.data_column_ids.iter().map(|id| id.columns.len()).sum()
     }
 }
 
@@ -1029,6 +1030,18 @@ impl std::fmt::Display for DataColumnsByRootRequest {
             f,
             "Request: DataColumnsByRoot: Number of Requested Data Column Ids: {}",
             self.data_column_ids.len()
+        )
+    }
+}
+
+impl std::fmt::Display for DataColumnsByRangeRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Request: DataColumnsByRange: Start Slot: {}, Count: {}, Number of Requested Columns Ids: {}",
+            self.start_slot,
+            self.count,
+            self.columns.len()
         )
     }
 }
