@@ -196,7 +196,7 @@ impl<P: Preset> Decoder for SSZSnappyInboundCodec<P> {
         // packet size for ssz container corresponding to `self.protocol`.
         let ssz_limits = self
             .protocol
-            .rpc_request_limits(&self.chain_config, self.fork_context.current_fork());
+            .rpc_request_limits(&self.chain_config, self.fork_context.current_fork())?;
 
         if ssz_limits.is_out_of_bounds(length, self.max_packet_size) {
             return Err(RPCError::InvalidData(format!(
@@ -290,7 +290,7 @@ impl<P: Preset> SSZSnappyOutboundCodec<P> {
 
         // Should not attempt to decode rpc chunks with `length > max_packet_size` or not within bounds of
         // packet size for ssz container corresponding to `self.protocol`.
-        let ssz_limits = self.protocol.rpc_response_limits::<P>(&self.fork_context);
+        let ssz_limits = self.protocol.rpc_response_limits::<P>(&self.fork_context)?;
         if ssz_limits.is_out_of_bounds(length, self.max_packet_size) {
             return Err(RPCError::InvalidData(format!(
                 "RPC response length is out of bounds, length {}, max {}, min {}, max_packet_size: {}",
@@ -2369,7 +2369,9 @@ mod tests {
         let config = Arc::new(Config::mainnet().rapid_upgrade());
         let fork_context = Arc::new(ForkContext::dummy::<Mainnet>(&config, Phase::Phase0));
 
-        let limit = protocol_id.rpc_response_limits::<Mainnet>(&fork_context);
+        let limit = protocol_id
+            .rpc_response_limits::<Mainnet>(&fork_context)
+            .unwrap();
         let mut max = encode_len(limit.max + 1);
         let mut codec = SSZSnappyOutboundCodec::<Mainnet>::new(
             protocol_id.clone(),
@@ -2393,7 +2395,9 @@ mod tests {
         ));
 
         // Request limits
-        let limit = protocol_id.rpc_request_limits(&config, Phase::Deneb);
+        let limit = protocol_id
+            .rpc_request_limits(&config, Phase::Deneb)
+            .unwrap();
         let mut max = encode_len(limit.max + 1);
         let mut codec = SSZSnappyOutboundCodec::<Mainnet>::new(
             protocol_id.clone(),

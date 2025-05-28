@@ -5,11 +5,10 @@ use futures::future::BoxFuture;
 use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, StreamExt};
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
-use ssz::{ReadError, SszSize as _, SszWrite as _, WriteError, H256};
+use ssz::{ContiguousList, ReadError, SizeError, SszSize as _, WriteError, H256};
 use std::io;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::LazyLock;
 use std::time::Duration;
 use std_ext::ArcExt as _;
 use strum::{AsRefStr, Display, EnumString, IntoStaticStr};
@@ -26,38 +25,23 @@ use types::{
         LightClientBootstrap as AltairLightClientBootstrap,
         LightClientFinalityUpdate as AltairLightClientFinalityUpdate,
         LightClientOptimisticUpdate as AltairLightClientOptimisticUpdate,
-        LightClientUpdate as AltairLightClientUpdate,
+        LightClientUpdate as AltairLightClientUpdate, SignedBeaconBlock as AltairSignedBeaconBlock,
     },
+    bellatrix::containers::SignedBeaconBlock as BellatrixSignedBeaconBlock,
     config::Config as ChainConfig,
+    deneb::containers::BlobSidecar,
     eip7594::DataColumnSidecar,
     nonstandard::Phase,
+    phase0::containers::SignedBeaconBlock as Phase0SignedBeaconBlock,
     preset::{Mainnet, Preset},
 };
 
-pub const SIGNED_BEACON_BLOCK_PHASE0_MIN: usize = 404;
-pub const SIGNED_BEACON_BLOCK_PHASE0_MAX: usize = 157756;
-pub const SIGNED_BEACON_BLOCK_ALTAIR_MAX: usize = 157916;
-pub const SIGNED_BEACON_BLOCK_BELLATRIX_MAX: usize = 1125899911195388;
+pub const ERROR_TYPE_MIN: usize = ContiguousList::<u8, MaxErrorLen>::SIZE.minimum();
 
-pub const BLOB_SIDECAR_MIN: usize = 131928;
-pub const BLOB_SIDECAR_MAX: usize = 131928;
-
-pub static DATA_COLUMN_MIN: LazyLock<usize> = LazyLock::new(|| {
-    DataColumnSidecar::<Mainnet>::default()
-        .to_ssz()
-        .expect("default DataColumnSidecar unavailable in SSZ")
-        .len()
-});
-
-pub static DATA_COLUMN_MAX: LazyLock<usize> = LazyLock::new(|| {
-    DataColumnSidecar::<Mainnet>::full()
-        .to_ssz()
-        .expect("full DataColumnSidecar unavailable in SSZ")
-        .len()
-});
-
-pub const ERROR_TYPE_MIN: usize = 0;
-pub const ERROR_TYPE_MAX: usize = 256;
+pub const ERROR_TYPE_MAX: usize = match ContiguousList::<u8, MaxErrorLen>::SIZE.maximum() {
+    Ok(size) => size,
+    Err(_) => panic!("error while calculating size of error type"),
+};
 
 // pub(crate) const MAX_RPC_SIZE_POST_EIP4844: usize = 10 * 1_048_576; // 10M
 
@@ -71,73 +55,95 @@ const REQUEST_TIMEOUT: u64 = 15;
 ///
 /// Note: This function should take care to return the min/max limits accounting for all
 /// previous valid forks when adding a new fork variant.
-pub fn rpc_block_limits_by_fork(current_fork: Phase) -> RpcLimits {
+pub fn rpc_block_limits_by_fork<P: Preset>(current_fork: Phase) -> Result<RpcLimits, SizeError> {
+    let phase0_size = Phase0SignedBeaconBlock::<P>::SIZE;
+    let altair_size = AltairSignedBeaconBlock::<P>::SIZE;
+    let bellatrix_size = BellatrixSignedBeaconBlock::<P>::SIZE;
+
     match &current_fork {
-        Phase::Phase0 => RpcLimits::new(
-            SIGNED_BEACON_BLOCK_PHASE0_MIN,
-            SIGNED_BEACON_BLOCK_PHASE0_MAX,
-        ),
-        Phase::Altair => RpcLimits::new(
-            SIGNED_BEACON_BLOCK_PHASE0_MIN, // Base block is smaller than altair blocks
-            SIGNED_BEACON_BLOCK_ALTAIR_MAX, // Altair block is larger than base blocks
-        ),
+        Phase::Phase0 => Ok(RpcLimits::new(
+            phase0_size.minimum(),
+            phase0_size.maximum()?,
+        )),
+        Phase::Altair => Ok(RpcLimits::new(
+            // Base block is smaller than altair blocks
+            phase0_size.minimum().min(altair_size.minimum()),
+            // Altair block is larger than base blocks
+            phase0_size.maximum()?.max(altair_size.maximum()?),
+        )),
         // After the merge the max SSZ size of a block is absurdly big. The size is actually
         // bound by other constants, so here we default to the bellatrix's max value
-        _ => RpcLimits::new(
-            SIGNED_BEACON_BLOCK_PHASE0_MIN, // Base block is smaller than altair and merge blocks
-            SIGNED_BEACON_BLOCK_BELLATRIX_MAX, // Merge block is larger than base and altair blocks
-        ),
+        _ => Ok(RpcLimits::new(
+            // Base block is smaller than altair and merge blocks
+            phase0_size
+                .minimum()
+                .min(altair_size.minimum())
+                .min(bellatrix_size.minimum()),
+            // Merge block is larger than base and altair blocks
+            phase0_size
+                .maximum()?
+                .max(altair_size.maximum()?)
+                .max(bellatrix_size.maximum()?),
+        )),
     }
 }
 
 fn rpc_light_client_updates_by_range_limits_by_fork<P: Preset>(current_fork: Phase) -> RpcLimits {
-    let altair_fixed_len = AltairLightClientUpdate::<Mainnet>::SIZE.get();
+    const { assert!(AltairLightClientUpdate::<Mainnet>::SIZE.is_fixed()) }
+
+    let altair_fixed_len = AltairLightClientUpdate::<Mainnet>::SIZE.fixed_part();
 
     match &current_fork {
         Phase::Phase0 => RpcLimits::new(0, 0),
         Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
         Phase::Capella | Phase::Deneb | Phase::Electra => RpcLimits::new(
             altair_fixed_len,
-            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.fixed_part(),
         ),
     }
 }
 
 fn rpc_light_client_finality_update_limits_by_fork<P: Preset>(current_fork: Phase) -> RpcLimits {
-    let altair_fixed_len = AltairLightClientFinalityUpdate::<Mainnet>::SIZE.get();
+    const { assert!(AltairLightClientFinalityUpdate::<Mainnet>::SIZE.is_fixed()) }
+
+    let altair_fixed_len = AltairLightClientFinalityUpdate::<Mainnet>::SIZE.fixed_part();
 
     match &current_fork {
         Phase::Phase0 => RpcLimits::new(0, 0),
         Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
         Phase::Capella | Phase::Deneb | Phase::Electra => RpcLimits::new(
             altair_fixed_len,
-            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.fixed_part(),
         ),
     }
 }
 
 fn rpc_light_client_optimistic_update_limits_by_fork<P: Preset>(current_fork: Phase) -> RpcLimits {
-    let altair_fixed_len = AltairLightClientOptimisticUpdate::<Mainnet>::SIZE.get();
+    const { assert!(AltairLightClientOptimisticUpdate::<Mainnet>::SIZE.is_fixed()) }
+
+    let altair_fixed_len = AltairLightClientOptimisticUpdate::<Mainnet>::SIZE.fixed_part();
 
     match &current_fork {
         Phase::Phase0 => RpcLimits::new(0, 0),
         Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
         Phase::Capella | Phase::Deneb | Phase::Electra => RpcLimits::new(
             altair_fixed_len,
-            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.fixed_part(),
         ),
     }
 }
 
 fn rpc_light_client_bootstrap_limits_by_fork<P: Preset>(current_fork: Phase) -> RpcLimits {
-    let altair_fixed_len = AltairLightClientBootstrap::<Mainnet>::SIZE.get();
+    const { assert!(AltairLightClientBootstrap::<Mainnet>::SIZE.is_fixed()) }
+
+    let altair_fixed_len = AltairLightClientBootstrap::<Mainnet>::SIZE.fixed_part();
 
     match &current_fork {
         Phase::Phase0 => RpcLimits::new(0, 0),
         Phase::Altair | Phase::Bellatrix => RpcLimits::new(altair_fixed_len, altair_fixed_len),
         Phase::Capella | Phase::Deneb | Phase::Electra => RpcLimits::new(
             altair_fixed_len,
-            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.get(),
+            altair_fixed_len + P::MaxExtraDataBytes::USIZE * u8::SIZE.fixed_part(),
         ),
     }
 }
@@ -412,82 +418,96 @@ impl AsRef<str> for ProtocolId {
 
 impl ProtocolId {
     /// Returns min and max size for messages of given protocol id requests.
-    pub fn rpc_request_limits(&self, chain_config: &ChainConfig, phase: Phase) -> RpcLimits {
+    pub fn rpc_request_limits(
+        &self,
+        chain_config: &ChainConfig,
+        phase: Phase,
+    ) -> Result<RpcLimits, SizeError> {
         match self.versioned_protocol.protocol() {
-            Protocol::Status => {
-                RpcLimits::new(StatusMessage::SIZE.get(), StatusMessage::SIZE.get())
-            }
-            Protocol::Goodbye => {
-                RpcLimits::new(GoodbyeReason::SIZE.get(), GoodbyeReason::SIZE.get())
-            }
+            Protocol::Status => Ok(RpcLimits::new(
+                StatusMessage::SIZE.minimum(),
+                StatusMessage::SIZE.maximum()?,
+            )),
+            Protocol::Goodbye => Ok(RpcLimits::new(
+                GoodbyeReason::SIZE.minimum(),
+                GoodbyeReason::SIZE.maximum()?,
+            )),
             // V1 and V2 requests are the same
-            Protocol::BlocksByRange => RpcLimits::new(
-                OldBlocksByRangeRequestV2::SIZE.get(),
-                OldBlocksByRangeRequestV2::SIZE.get(),
-            ),
-            Protocol::BlocksByRoot => RpcLimits::new(
+            Protocol::BlocksByRange => Ok(RpcLimits::new(
+                OldBlocksByRangeRequestV2::SIZE.minimum(),
+                OldBlocksByRangeRequestV2::SIZE.maximum()?,
+            )),
+            Protocol::BlocksByRoot => Ok(RpcLimits::new(
                 0,
-                chain_config.max_request_blocks(Phase::Phase0) as usize * H256::SIZE.get(),
-            ),
-            Protocol::BlobsByRange => RpcLimits::new(
-                BlobsByRangeRequest::SIZE.get(),
-                BlobsByRangeRequest::SIZE.get(),
-            ),
-            Protocol::BlobsByRoot => RpcLimits::new(
+                chain_config.max_request_blocks(Phase::Phase0) as usize * H256::SIZE.fixed_part(),
+            )),
+            Protocol::BlobsByRange => Ok(RpcLimits::new(
+                BlobsByRangeRequest::SIZE.minimum(),
+                BlobsByRangeRequest::SIZE.maximum()?,
+            )),
+            Protocol::BlobsByRoot => Ok(RpcLimits::new(
                 0,
-                chain_config.max_request_blob_sidecars(phase) as usize * BlobIdentifier::SIZE.get(),
-            ),
-            Protocol::DataColumnsByRoot => RpcLimits::new(
+                chain_config.max_request_blob_sidecars(phase) as usize
+                    * BlobIdentifier::SIZE.fixed_part(),
+            )),
+            Protocol::DataColumnsByRoot => Ok(RpcLimits::new(
                 0,
                 chain_config.max_request_data_column_sidecars as usize
-                    * DataColumnIdentifier::SIZE.get(),
-            ),
-            Protocol::DataColumnsByRange => RpcLimits::new(
+                    * DataColumnIdentifier::SIZE.fixed_part(),
+            )),
+            Protocol::DataColumnsByRange => Ok(RpcLimits::new(
                 DataColumnsByRangeRequest::ssz_min_len().unwrap_or_default(),
                 DataColumnsByRangeRequest::ssz_max_len()
                     .expect("Unable to get DataColumnsByRange ssz_max_len"),
-            ),
-            Protocol::Ping => RpcLimits::new(Ping::SIZE.get(), Ping::SIZE.get()),
-            Protocol::LightClientBootstrap => RpcLimits::new(
-                LightClientBootstrapRequest::SIZE.get(),
-                LightClientBootstrapRequest::SIZE.get(),
-            ),
-            Protocol::LightClientOptimisticUpdate => RpcLimits::new(0, 0),
-            Protocol::LightClientFinalityUpdate => RpcLimits::new(0, 0),
-            Protocol::LightClientUpdatesByRange => RpcLimits::new(0, 0),
-            Protocol::MetaData => RpcLimits::new(0, 0), // Metadata requests are empty
+            )),
+            Protocol::Ping => Ok(RpcLimits::new(Ping::SIZE.minimum(), Ping::SIZE.maximum()?)),
+            Protocol::LightClientBootstrap => Ok(RpcLimits::new(
+                LightClientBootstrapRequest::SIZE.minimum(),
+                LightClientBootstrapRequest::SIZE.maximum()?,
+            )),
+            Protocol::LightClientOptimisticUpdate => Ok(RpcLimits::new(0, 0)),
+            Protocol::LightClientFinalityUpdate => Ok(RpcLimits::new(0, 0)),
+            Protocol::LightClientUpdatesByRange => Ok(RpcLimits::new(0, 0)),
+            Protocol::MetaData => Ok(RpcLimits::new(0, 0)), // Metadata requests are empty
         }
     }
 
     /// Returns min and max size for messages of given protocol id responses.
-    pub fn rpc_response_limits<P: Preset>(&self, fork_context: &ForkContext) -> RpcLimits {
+    pub fn rpc_response_limits<P: Preset>(
+        &self,
+        fork_context: &ForkContext,
+    ) -> Result<RpcLimits, SizeError> {
         match self.versioned_protocol.protocol() {
-            Protocol::Status => {
-                RpcLimits::new(StatusMessage::SIZE.get(), StatusMessage::SIZE.get())
-            }
-            Protocol::Goodbye => RpcLimits::new(0, 0), // Goodbye request has no response
-            Protocol::BlocksByRange => rpc_block_limits_by_fork(fork_context.current_fork()),
-            Protocol::BlocksByRoot => rpc_block_limits_by_fork(fork_context.current_fork()),
+            Protocol::Status => Ok(RpcLimits::new(
+                StatusMessage::SIZE.minimum(),
+                StatusMessage::SIZE.maximum()?,
+            )),
+            Protocol::Goodbye => Ok(RpcLimits::new(0, 0)), // Goodbye request has no response
+            Protocol::BlocksByRange => rpc_block_limits_by_fork::<P>(fork_context.current_fork()),
+            Protocol::BlocksByRoot => rpc_block_limits_by_fork::<P>(fork_context.current_fork()),
             Protocol::BlobsByRange => rpc_blob_limits::<P>(),
             Protocol::BlobsByRoot => rpc_blob_limits::<P>(),
             Protocol::DataColumnsByRoot => rpc_data_column_limits::<P>(fork_context.current_fork()),
             Protocol::DataColumnsByRange => {
                 rpc_data_column_limits::<P>(fork_context.current_fork())
             }
-            Protocol::Ping => RpcLimits::new(Ping::SIZE.get(), Ping::SIZE.get()),
-            Protocol::MetaData => RpcLimits::new(MetaDataV1::SIZE.get(), MetaDataV3::SIZE.get()),
-            Protocol::LightClientBootstrap => {
-                rpc_light_client_bootstrap_limits_by_fork::<P>(fork_context.current_fork())
-            }
-            Protocol::LightClientOptimisticUpdate => {
-                rpc_light_client_optimistic_update_limits_by_fork::<P>(fork_context.current_fork())
-            }
-            Protocol::LightClientFinalityUpdate => {
-                rpc_light_client_finality_update_limits_by_fork::<P>(fork_context.current_fork())
-            }
-            Protocol::LightClientUpdatesByRange => {
-                rpc_light_client_updates_by_range_limits_by_fork::<P>(fork_context.current_fork())
-            }
+            Protocol::Ping => Ok(RpcLimits::new(Ping::SIZE.minimum(), Ping::SIZE.maximum()?)),
+            Protocol::MetaData => Ok(RpcLimits::new(
+                MetaDataV1::SIZE.minimum(),
+                MetaDataV3::SIZE.maximum()?,
+            )),
+            Protocol::LightClientBootstrap => Ok(rpc_light_client_bootstrap_limits_by_fork::<P>(
+                fork_context.current_fork(),
+            )),
+            Protocol::LightClientOptimisticUpdate => Ok(
+                rpc_light_client_optimistic_update_limits_by_fork::<P>(fork_context.current_fork()),
+            ),
+            Protocol::LightClientFinalityUpdate => Ok(
+                rpc_light_client_finality_update_limits_by_fork::<P>(fork_context.current_fork()),
+            ),
+            Protocol::LightClientUpdatesByRange => Ok(
+                rpc_light_client_updates_by_range_limits_by_fork::<P>(fork_context.current_fork()),
+            ),
         }
     }
 
@@ -838,6 +858,13 @@ impl From<WriteError> for RPCError {
     }
 }
 
+impl From<SizeError> for RPCError {
+    #[inline]
+    fn from(_: SizeError) -> Self {
+        RPCError::InternalError("error while calculating size of SSZ type")
+    }
+}
+
 impl From<tokio::time::error::Elapsed> for RPCError {
     fn from(_: tokio::time::error::Elapsed) -> Self {
         RPCError::StreamTimeout
@@ -876,12 +903,14 @@ impl std::fmt::Display for RPCError {
 
 impl std::error::Error for RPCError {}
 
-pub fn rpc_blob_limits<P: Preset>() -> RpcLimits {
-    RpcLimits::new(BLOB_SIDECAR_MIN, BLOB_SIDECAR_MAX)
+pub fn rpc_blob_limits<P: Preset>() -> Result<RpcLimits, SizeError> {
+    let size = BlobSidecar::<P>::SIZE;
+    Ok(RpcLimits::new(size.minimum(), size.maximum()?))
 }
 
-pub fn rpc_data_column_limits<P: Preset>(_phase: Phase) -> RpcLimits {
-    RpcLimits::new(*DATA_COLUMN_MIN, *DATA_COLUMN_MAX)
+pub fn rpc_data_column_limits<P: Preset>(_phase: Phase) -> Result<RpcLimits, SizeError> {
+    let size = DataColumnSidecar::<P>::SIZE;
+    Ok(RpcLimits::new(size.minimum(), size.maximum()?))
 }
 
 impl<P: Preset> std::fmt::Display for RequestType<P> {
@@ -928,12 +957,8 @@ impl RPCError {
 
 #[cfg(test)]
 mod tests {
-    use ssz::{ContiguousList, DynamicList, SszWrite as _};
-    use types::{
-        deneb::containers::BlobSidecar,
-        phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::H256},
-        preset::Mainnet,
-    };
+    use ssz::{ContiguousList, DynamicList, Size, SszWrite as _};
+    use types::{deneb::containers::BlobSidecar, phase0::primitives::H256, preset::Mainnet};
 
     use crate::{factory, rpc::methods::MaxErrorLen};
 
@@ -944,27 +969,30 @@ mod tests {
         let config = ChainConfig::mainnet();
 
         assert_eq!(
-            SIGNED_BEACON_BLOCK_PHASE0_MIN,
-            Phase0SignedBeaconBlock::<Mainnet>::default()
-                .to_ssz()
-                .unwrap()
-                .len(),
+            Phase0SignedBeaconBlock::<Mainnet>::SIZE,
+            Size::Variable {
+                minimum: 404,
+                maximum: Ok(157_756),
+            },
         );
+
         assert_eq!(
-            SIGNED_BEACON_BLOCK_PHASE0_MAX,
-            factory::full_phase0_signed_beacon_block::<Mainnet>()
-                .to_ssz()
-                .unwrap()
-                .len(),
+            AltairSignedBeaconBlock::<Mainnet>::SIZE,
+            Size::Variable {
+                minimum: 404,
+                maximum: Ok(157_916),
+            },
         );
+
         assert_eq!(
-            SIGNED_BEACON_BLOCK_ALTAIR_MAX,
-            factory::full_altair_signed_beacon_block::<Mainnet>()
-                .to_ssz()
-                .unwrap()
-                .len(),
+            BellatrixSignedBeaconBlock::<Mainnet>::SIZE,
+            Size::Variable {
+                minimum: 404,
+                maximum: Ok(1_125_899_911_195_388),
+            },
         );
-        assert_eq!(0, DynamicList::<H256>::empty().to_ssz().unwrap().len());
+
+        assert_eq!(DynamicList::<H256>::SIZE.minimum(), 0);
         assert_eq!(
             // Previously defined as constant
             32_768,
@@ -976,21 +1004,10 @@ mod tests {
             .unwrap()
             .len(),
         );
-        assert_eq!(
-            ERROR_TYPE_MIN,
-            ContiguousList::<u8, MaxErrorLen>::default()
-                .to_ssz()
-                .unwrap()
-                .len(),
-        );
-        assert_eq!(
-            ERROR_TYPE_MAX,
-            ContiguousList::<u8, MaxErrorLen>::full(0)
-                .to_ssz()
-                .unwrap()
-                .len(),
-        );
-        assert_eq!(BLOB_SIDECAR_MIN, BlobSidecar::<Mainnet>::SIZE.get());
-        assert_eq!(BLOB_SIDECAR_MAX, BlobSidecar::<Mainnet>::SIZE.get());
+
+        assert_eq!(ERROR_TYPE_MIN, 0);
+        assert_eq!(ERROR_TYPE_MAX, 256);
+
+        assert_eq!(BlobSidecar::<Mainnet>::SIZE, Size::Fixed { size: 131928 });
     }
 }
