@@ -1,15 +1,12 @@
 use parking_lot::RwLock;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use helper_functions::misc;
 use std::collections::HashMap;
 use types::{
     config::Config,
     nonstandard::Phase,
-    phase0::{
-        consts::GENESIS_EPOCH,
-        primitives::{Epoch, ForkDigest, Slot, H256},
-    },
+    phase0::primitives::{ForkDigest, Slot, H256},
     preset::Preset,
 };
 
@@ -18,9 +15,8 @@ use types::{
 pub struct ForkContext {
     chain_config: Arc<Config>,
     current_fork: RwLock<Phase>,
-    current_fork_digest: RwLock<ForkDigest>,
-    fork_epoch_to_digest: BTreeMap<Epoch, ForkDigest>,
-    digest_to_fork_epoch: HashMap<ForkDigest, Epoch>,
+    fork_to_digest: HashMap<Phase, ForkDigest>,
+    digest_to_fork: HashMap<ForkDigest, Phase>,
 }
 
 impl ForkContext {
@@ -31,31 +27,23 @@ impl ForkContext {
         current_slot: Slot,
         genesis_validators_root: H256,
     ) -> Self {
-        let fork_epoch_to_digest = enum_iterator::all::<Phase>()
+        let fork_to_digest = enum_iterator::all::<Phase>()
             .filter(|phase| config.is_phase_enabled::<P>(*phase))
-            .map(|phase| config.fork_epoch(phase))
-            .chain(config.blob_schedule.iter().map(|entry| entry.epoch))
-            .map(|epoch| {
-                let digest = misc::compute_fork_digest(config, genesis_validators_root, epoch);
-                (epoch, digest)
+            .map(|phase| {
+                let version = config.version(phase);
+                let digest = misc::compute_fork_digest(version, genesis_validators_root);
+                (phase, digest)
             })
-            .collect::<BTreeMap<_, _>>();
+            .collect::<HashMap<_, _>>();
 
-        let digest_to_fork_epoch = fork_epoch_to_digest.iter().map(|(k, v)| (*v, *k)).collect();
+        let digest_to_fork = fork_to_digest.iter().map(|(k, v)| (*v, *k)).collect();
         let current_fork = RwLock::new(config.phase_at_slot::<P>(current_slot));
-        let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
-        let current_fork_digest = fork_epoch_to_digest
-            .iter()
-            .rev()
-            .find_map(|(epoch, fork_digest)| (*epoch <= current_epoch).then_some(*fork_digest))
-            .unwrap_or_default();
 
         Self {
             chain_config: config.clone(),
             current_fork,
-            current_fork_digest: RwLock::new(current_fork_digest),
-            fork_epoch_to_digest,
-            digest_to_fork_epoch,
+            fork_to_digest,
+            digest_to_fork,
         }
     }
 
@@ -70,8 +58,7 @@ impl ForkContext {
 
     /// Returns `true` if the provided `phase` exists in the `ForkContext` object.
     pub fn fork_exists(&self, phase: Phase) -> bool {
-        let fork_epoch = self.chain_config.fork_epoch(phase);
-        self.fork_epoch_to_digest.contains_key(&fork_epoch)
+        self.fork_to_digest.contains_key(&phase)
     }
 
     /// Returns the `current_fork`.
@@ -84,54 +71,32 @@ impl ForkContext {
         *self.current_fork.write() = new_fork;
     }
 
-    /// Returns the `current_fork_digest`.
-    pub fn current_fork_digest(&self) -> ForkDigest {
-        *self.current_fork_digest.read()
-    }
-
-    /// Updates the `current_fork_digest` field to a new fork digest.
-    pub fn update_current_fork_digest(&self, new_fork_digest: ForkDigest) {
-        *self.current_fork_digest.write() = new_fork_digest;
-    }
-
     /// Returns the context bytes/fork_digest corresponding to the genesis fork version.
     pub fn genesis_context_bytes(&self) -> ForkDigest {
         *self
-            .fork_epoch_to_digest
-            .get(&GENESIS_EPOCH)
+            .fork_to_digest
+            .get(&Phase::Phase0)
             .expect("ForkContext must contain genesis context bytes")
     }
 
     /// Returns the fork type given the context bytes/fork_digest.
     /// Returns `None` if context bytes doesn't correspond to any valid `Phase`.
-    pub fn from_context_bytes(&self, context: ForkDigest) -> Option<Phase> {
-        self.digest_to_fork_epoch
-            .get(&context)
-            .map(|fork_epoch| self.chain_config.phase_at_epoch(*fork_epoch))
+    pub fn from_context_bytes(&self, context: ForkDigest) -> Option<&Phase> {
+        self.digest_to_fork.get(&context)
     }
 
     /// Returns the context bytes/fork_digest corresponding to a fork name.
     /// Returns `None` if the `Phase` has not been initialized.
     pub fn to_context_bytes(&self, phase: Phase) -> Option<ForkDigest> {
-        let fork_epoch = self.chain_config.fork_epoch(phase);
-        self.fork_epoch_to_digest.get(&fork_epoch).cloned()
+        self.fork_to_digest.get(&phase).cloned()
     }
 
     /// Returns all `fork_digest`s that are currently in the `ForkContext` object.
     pub fn all_fork_digests(&self) -> Vec<ForkDigest> {
-        self.digest_to_fork_epoch.keys().cloned().collect()
+        self.digest_to_fork.keys().cloned().collect()
     }
 
     pub fn chain_config(&self) -> &Arc<Config> {
         &self.chain_config
-    }
-
-    pub fn next_fork(&self, current_epoch: Epoch) -> (Epoch, ForkDigest) {
-        self.fork_epoch_to_digest
-            .iter()
-            .find_map(|(epoch, fork_digest)| {
-                (*epoch > current_epoch).then_some((*epoch, *fork_digest))
-            })
-            .unwrap_or((Epoch::MAX, ForkDigest::default()))
     }
 }

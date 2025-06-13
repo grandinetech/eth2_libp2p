@@ -18,8 +18,8 @@ pub use libp2p::identity::{Keypair, PublicKey};
 use alloy_rlp::bytes::Bytes;
 use anyhow::{anyhow, Error, Result};
 use enr::{
-    ATTESTATION_BITFIELD_ENR_KEY, ETH2_ENR_KEY, NEXT_FORK_DIGEST_ENR_KEY,
-    PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY, SYNC_COMMITTEE_BITFIELD_ENR_KEY,
+    ATTESTATION_BITFIELD_ENR_KEY, ETH2_ENR_KEY, PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY,
+    SYNC_COMMITTEE_BITFIELD_ENR_KEY,
 };
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;
@@ -49,7 +49,6 @@ use std::{
 };
 use tokio::sync::mpsc;
 use types::config::Config as ChainConfig;
-use types::phase0::primitives::ForkDigest;
 
 use crate::types::EnrForkId;
 
@@ -611,22 +610,6 @@ impl Discovery {
         enr::save_enr_to_disk(self.enr_dir.as_deref(), &self.local_enr(), &self.log);
     }
 
-    /// Update the `nfd` field of our local ENR.
-    pub fn update_enr_nfd(&mut self, next_fork_digest: ForkDigest) -> Result<()> {
-        info!(self.log, "Update the ENR next fork digest";
-            "next_fork_digest" => ?next_fork_digest,
-        );
-
-        self.discv5
-            .enr_insert::<Bytes>(NEXT_FORK_DIGEST_ENR_KEY, &next_fork_digest.to_ssz()?.into())?;
-        // replace the global version with discovery version
-        *self.network_globals.local_enr.write() = self.discv5.local_enr();
-
-        // persist modified enr to disk
-        enr::save_enr_to_disk(self.enr_dir.as_deref(), &self.local_enr(), &self.log);
-        Ok(())
-    }
-
     // Bans a peer and it's associated seen IP addresses.
     pub fn ban_peer(&mut self, peer_id: &PeerId, ip_addresses: Vec<IpAddr>) {
         // first try and convert the peer_id to a node_id.
@@ -810,8 +793,8 @@ impl Discovery {
     /// Search for a specified number of new peers using the underlying discovery mechanism.
     ///
     /// This can optionally search for peers for a given predicate. Regardless of the predicate
-    /// given, this will only search for peers on the same enr_fork_id and the same next_fork_digest
-    /// as specified in the local ENR.
+    /// given, this will only search for peers on the same enr_fork_id as specified in the local
+    /// ENR.
     fn start_query(
         &mut self,
         query: QueryType,
@@ -825,14 +808,12 @@ impl Discovery {
                 return;
             }
         };
-        let enr_nfd = self.local_enr().next_fork_digest();
         // predicate for finding nodes with a matching fork and valid tcp port
         let eth2_fork_predicate = move |enr: &Enr| {
             // `next_fork_epoch` and `next_fork_version` can be different so that
             // we can connect to peers who aren't compatible with an upcoming fork.
             // `fork_digest` **must** be same.
             enr.eth2().map(|e| e.fork_digest) == Ok(enr_fork_id.fork_digest)
-                && enr.next_fork_digest() == enr_nfd
                 && (enr.tcp4().is_some() || enr.tcp6().is_some())
         };
 

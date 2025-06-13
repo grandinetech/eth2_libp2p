@@ -1,7 +1,6 @@
 //! Helper functions and an extension trait for Ethereum 2 ENRs.
 
 pub use discv5::enr::CombinedKey;
-use types::phase0::primitives::ForkDigest;
 
 use super::enr_ext::CombinedKeyExt;
 use super::ENR_FILENAME;
@@ -12,7 +11,7 @@ use anyhow::{anyhow, Result};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use libp2p::identity::Keypair;
 use slog::{debug, warn};
-use ssz::{SszReadDefault, SszWrite};
+use ssz::{SszReadDefault as _, SszWrite as _};
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
@@ -29,8 +28,6 @@ pub const ATTESTATION_BITFIELD_ENR_KEY: &str = "attnets";
 pub const SYNC_COMMITTEE_BITFIELD_ENR_KEY: &str = "syncnets";
 /// The ENR field specifying the peerdas custody group count.
 pub const PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY: &str = "cgc";
-/// The ENR field specifying the digest of the next scheduled fork.
-pub const NEXT_FORK_DIGEST_ENR_KEY: &str = "nfd";
 
 /// Extension trait for ENR's within Eth2.
 pub trait Eth2Enr {
@@ -42,9 +39,6 @@ pub trait Eth2Enr {
 
     /// The peerdas custody group count associated with the ENR.
     fn custody_group_count(&self, config: &ChainConfig) -> Result<u64, &'static str>;
-
-    // the digest of the next scheduled fork associated with the ENR.
-    fn next_fork_digest(&self) -> Result<ForkDigest, &'static str>;
 
     fn eth2(&self) -> Result<EnrForkId, &'static str>;
 }
@@ -82,16 +76,6 @@ impl Eth2Enr for Enr {
         } else {
             Err("Invalid custody group count in ENR")
         }
-    }
-
-    fn next_fork_digest(&self) -> Result<ForkDigest, &'static str> {
-        let nfd_bytes = self
-            .get_decodable::<Bytes>(NEXT_FORK_DIGEST_ENR_KEY)
-            .ok_or("ENR next fork digest non-existent")?
-            .map_err(|_| "Invalid RLP Encoding")?;
-
-        ForkDigest::from_ssz_default(&nfd_bytes)
-            .map_err(|_| "Could not decode the ENR next fork digest")
     }
 
     fn eth2(&self) -> Result<EnrForkId, &'static str> {
@@ -283,10 +267,6 @@ pub fn build_enr(
         let custody_group_count =
             chain_config.custody_group_count(config.subscribe_all_data_column_subnets);
         builder.add_value(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY, &custody_group_count);
-
-        // set the `nfd` field on our ENR
-        let next_fork_digest = ForkDigest::default();
-        builder.add_value::<Bytes>(NEXT_FORK_DIGEST_ENR_KEY, &next_fork_digest.to_ssz()?.into());
     }
 
     builder
@@ -313,12 +293,11 @@ fn compare_enr(local_enr: &Enr, disk_enr: &Enr) -> bool {
         && (local_enr.udp4().is_none() || local_enr.udp4() == disk_enr.udp4())
         && (local_enr.udp6().is_none() || local_enr.udp6() == disk_enr.udp6())
         // we need the ATTESTATION_BITFIELD_ENR_KEY and SYNC_COMMITTEE_BITFIELD_ENR_KEY and
-        // PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY and NEXT_FORK_DIGEST_ENR_KEY key to match,
-        // otherwise we use a new ENR. This will likely only be true for non-validating nodes.
+        // PEERDAS_CUSTODY_SUBNET_COUNT_ENR_KEY key to match, otherwise we use a new ENR. This will
+        // likely only be true for non-validating nodes.
         && local_enr.get_decodable::<Bytes>(ATTESTATION_BITFIELD_ENR_KEY) == disk_enr.get_decodable(ATTESTATION_BITFIELD_ENR_KEY)
         && local_enr.get_decodable::<Bytes>(SYNC_COMMITTEE_BITFIELD_ENR_KEY) == disk_enr.get_decodable(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
-        && local_enr.get_decodable::<u64>(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY) == disk_enr.get_decodable(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY)
-        && local_enr.get_decodable::<Bytes>(NEXT_FORK_DIGEST_ENR_KEY) == disk_enr.get_decodable(NEXT_FORK_DIGEST_ENR_KEY)
+        && local_enr.get_decodable::<Bytes>(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY) == disk_enr.get_decodable(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY)
 }
 
 /// Loads enr from the given directory

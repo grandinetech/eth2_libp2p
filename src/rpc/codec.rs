@@ -1164,6 +1164,7 @@ fn context_bytes_to_phase(
 ) -> Result<Phase, RPCError> {
     fork_context
         .from_context_bytes(context_bytes)
+        .cloned()
         .ok_or_else(|| {
             let encoded = hex::encode(context_bytes);
             RPCError::ErrorResponse(
