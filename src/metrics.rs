@@ -10,12 +10,14 @@ pub use crate::common::metrics::{
     try_create_int_gauge, try_create_int_gauge_vec,
 };
 use crate::{
-    common::metrics::{get_int_gauge, set_gauge_entry},
+    common::metrics::{get_int_gauge, set_gauge_entry, try_create_histogram},
     peer_manager::peerdb::client::ClientKind,
     types::GossipKind,
     GossipTopic, Gossipsub, NetworkGlobals,
 };
-use prometheus::{Gauge, GaugeVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Result};
+use prometheus::{
+    Gauge, GaugeVec, Histogram, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Result,
+};
 use strum::IntoEnumIterator as _;
 
 pub static NAT_OPEN: LazyLock<Result<IntGaugeVec>> = LazyLock::new(|| {
@@ -261,6 +263,20 @@ pub static REPORT_PEER_MSGS: LazyLock<Result<IntCounterVec>> = LazyLock::new(|| 
         "libp2p_report_peer_msgs_total",
         "Number of peer reports per msg",
         &["msg"],
+    )
+});
+
+pub static OUTBOUND_REQUEST_IDLING: LazyLock<Result<Histogram>> = LazyLock::new(|| {
+    try_create_histogram(
+        "outbound_request_idling_seconds",
+        "The time our own request remained idle in the self-limiter",
+    )
+});
+
+pub static RESPONSE_IDLING: LazyLock<Result<Histogram>> = LazyLock::new(|| {
+    try_create_histogram(
+        "response_idling_seconds",
+        "The time our response remained idle in the response limiter",
     )
 });
 
