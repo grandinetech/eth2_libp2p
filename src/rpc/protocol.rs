@@ -4,7 +4,6 @@ use crate::types::ForkContext;
 use futures::future::BoxFuture;
 use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, StreamExt};
-use helper_functions::misc;
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
 use ssz::{ReadError, SszSize as _, SszWrite as _, WriteError, H256};
 use std::io;
@@ -22,6 +21,7 @@ use tokio_util::{
 use typenum::Unsigned as _;
 use types::deneb::containers::BlobIdentifier;
 use types::fulu::containers::{DataColumnSidecar, DataColumnsByRootIdentifier};
+use types::phase0::primitives::Epoch;
 use types::{
     altair::containers::{
         LightClientBootstrap as AltairLightClientBootstrap,
@@ -482,27 +482,35 @@ impl ProtocolId {
                 RpcLimits::new(StatusMessageV1::SIZE.get(), StatusMessageV2::SIZE.get())
             }
             Protocol::Goodbye => RpcLimits::new(0, 0), // Goodbye request has no response
-            Protocol::BlocksByRange => rpc_block_limits_by_fork(fork_context.current_fork()),
-            Protocol::BlocksByRoot => rpc_block_limits_by_fork(fork_context.current_fork()),
+            Protocol::BlocksByRange => rpc_block_limits_by_fork(fork_context.current_fork_name()),
+            Protocol::BlocksByRoot => rpc_block_limits_by_fork(fork_context.current_fork_name()),
             Protocol::BlobsByRange => rpc_blob_limits::<P>(),
             Protocol::BlobsByRoot => rpc_blob_limits::<P>(),
-            Protocol::DataColumnsByRoot => rpc_data_column_limits::<P>(fork_context.current_fork()),
+            Protocol::DataColumnsByRoot => {
+                rpc_data_column_limits::<P>(fork_context.current_fork_name())
+            }
             Protocol::DataColumnsByRange => {
-                rpc_data_column_limits::<P>(fork_context.current_fork())
+                rpc_data_column_limits::<P>(fork_context.current_fork_name())
             }
             Protocol::Ping => RpcLimits::new(Ping::SIZE.get(), Ping::SIZE.get()),
             Protocol::MetaData => RpcLimits::new(MetaDataV1::SIZE.get(), MetaDataV3::SIZE.get()),
             Protocol::LightClientBootstrap => {
-                rpc_light_client_bootstrap_limits_by_fork::<P>(fork_context.current_fork())
+                rpc_light_client_bootstrap_limits_by_fork::<P>(fork_context.current_fork_name())
             }
             Protocol::LightClientOptimisticUpdate => {
-                rpc_light_client_optimistic_update_limits_by_fork::<P>(fork_context.current_fork())
+                rpc_light_client_optimistic_update_limits_by_fork::<P>(
+                    fork_context.current_fork_name(),
+                )
             }
             Protocol::LightClientFinalityUpdate => {
-                rpc_light_client_finality_update_limits_by_fork::<P>(fork_context.current_fork())
+                rpc_light_client_finality_update_limits_by_fork::<P>(
+                    fork_context.current_fork_name(),
+                )
             }
             Protocol::LightClientUpdatesByRange => {
-                rpc_light_client_updates_by_range_limits_by_fork::<P>(fork_context.current_fork())
+                rpc_light_client_updates_by_range_limits_by_fork::<P>(
+                    fork_context.current_fork_name(),
+                )
             }
         }
     }
@@ -647,16 +655,13 @@ impl<P: Preset> RequestType<P> {
     /* These functions are used in the handler for stream management */
 
     /// Maximum number of responses expected for this request.
-    pub fn max_responses(&self, chain_config: &ChainConfig, _current_phase: Phase) -> u64 {
+    pub fn max_responses(&self, chain_config: &ChainConfig, epoch: Epoch) -> u64 {
         match self {
             RequestType::Status(_) => 1,
             RequestType::Goodbye(_) => 0,
             RequestType::BlocksByRange(req) => req.count(),
             RequestType::BlocksByRoot(req) => req.len() as u64,
-            RequestType::BlobsByRange(req) => {
-                let epoch = misc::compute_epoch_at_slot::<P>(req.start_slot);
-                req.max_blobs_requested(chain_config, epoch)
-            }
+            RequestType::BlobsByRange(req) => req.max_blobs_requested(chain_config, epoch),
             RequestType::BlobsByRoot(req) => req.blob_ids.len() as u64,
             RequestType::DataColumnsByRoot(req) => req.max_requested() as u64,
             RequestType::DataColumnsByRange(req) => req.max_requested(),

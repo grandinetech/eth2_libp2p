@@ -172,6 +172,7 @@ pub fn build_or_load_enr<P: Preset>(
     local_key: Keypair,
     config: &NetworkConfig,
     enr_fork_id: &EnrForkId,
+    custody_group_count: Option<u64>,
     next_fork_digest: ForkDigest,
     log: &slog::Logger,
 ) -> Result<Enr> {
@@ -184,6 +185,7 @@ pub fn build_or_load_enr<P: Preset>(
         &enr_key,
         config,
         enr_fork_id,
+        custody_group_count,
         next_fork_digest,
     )?;
 
@@ -197,6 +199,7 @@ pub fn build_enr(
     enr_key: &CombinedKey,
     config: &NetworkConfig,
     enr_fork_id: &EnrForkId,
+    custody_group_count: Option<u64>,
     next_fork_digest: ForkDigest,
 ) -> Result<Enr> {
     let mut builder = discv5::enr::Enr::builder();
@@ -288,10 +291,15 @@ pub fn build_enr(
 
     // only set `cgc` and `nfd` if PeerDAS fork (Fulu) epoch has been scheduled
     if chain_config.is_peerdas_scheduled() {
-        let custody_group_count =
-            chain_config.custody_group_count(config.subscribe_all_data_column_subnets);
+        let custody_group_count = if let Some(cgc) = custody_group_count {
+            cgc
+        } else if config.subscribe_all_data_column_subnets {
+            chain_config.number_of_custody_groups
+        } else {
+            chain_config.custody_requirement
+        };
         builder.add_value(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY, &custody_group_count);
-        builder.add_value(NEXT_FORK_DIGEST_ENR_KEY, &next_fork_digest.to_ssz()?);
+        builder.add_value::<Bytes>(NEXT_FORK_DIGEST_ENR_KEY, &next_fork_digest.to_ssz()?.into());
     }
 
     builder
@@ -377,6 +385,7 @@ mod test {
     fn build_enr_with_config(
         chain_config: &ChainConfig,
         config: NetworkConfig,
+        custody_group_count: Option<u64>,
     ) -> (Enr, CombinedKey) {
         let keypair = libp2p::identity::secp256k1::Keypair::generate();
         let enr_key = CombinedKey::from_secp256k1(&keypair);
@@ -386,10 +395,18 @@ mod test {
             &enr_key,
             &config,
             &enr_fork_id,
+            custody_group_count,
             ForkDigest::default(),
         )
         .unwrap();
         (enr, enr_key)
+    }
+
+    #[test]
+    fn test_nfd_enr_encoding() {
+        let chain_config = make_fulu_config();
+        let enr = build_enr_with_config(&chain_config, NetworkConfig::default(), None).0;
+        assert_eq!(enr.next_fork_digest().unwrap(), ForkDigest::default());
     }
 
     #[test]
@@ -400,7 +417,7 @@ mod test {
         };
         let chain_config = make_fulu_config();
 
-        let enr = build_enr_with_config(&chain_config, config).0;
+        let enr = build_enr_with_config(&chain_config, config, None).0;
 
         assert_eq!(
             enr.custody_group_count(&chain_config).unwrap(),
@@ -415,7 +432,7 @@ mod test {
             ..NetworkConfig::default()
         };
         let chain_config = make_fulu_config();
-        let enr = build_enr_with_config(&chain_config, config).0;
+        let enr = build_enr_with_config(&chain_config, config, None).0;
 
         assert_eq!(
             enr.custody_group_count(&chain_config).unwrap(),
@@ -424,10 +441,18 @@ mod test {
     }
 
     #[test]
+    fn custody_group_value() {
+        let chain_config = make_fulu_config();
+        let enr = build_enr_with_config(&chain_config, NetworkConfig::default(), Some(42)).0;
+
+        assert_eq!(enr.custody_group_count(&chain_config).unwrap(), 42);
+    }
+
+    #[test]
     fn test_encode_decode_eth2_enr() {
         let config = NetworkConfig::default();
         let chain_config = make_fulu_config();
-        let (enr, _key) = build_enr_with_config(&chain_config, config);
+        let (enr, _key) = build_enr_with_config(&chain_config, config, None);
         // Check all Eth2 Mappings are decodeable
         enr.eth2().unwrap();
         enr.attestation_bitfield().unwrap();

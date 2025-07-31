@@ -560,16 +560,17 @@ impl Discovery {
     }
 
     /// Update the `cgc` field of our local ENR.
-    pub fn update_cgc_enr(&mut self, cgc: u64) -> Result<()> {
+    pub fn update_enr_cgc(&mut self, cgc: u64) -> Result<()> {
         self.discv5
             .enr_insert(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY, &cgc)
             .map_err(|e| anyhow!("{:?}", e))?;
 
+        // persist modified enr to disk
+        enr::save_enr_to_disk(self.enr_dir.as_deref(), &self.local_enr(), &self.log);
+
         // replace the global version
         *self.network_globals.local_enr.write() = self.discv5.local_enr();
 
-        // persist modified enr to disk
-        enr::save_enr_to_disk(self.enr_dir.as_deref(), &self.local_enr(), &self.log);
         Ok(())
     }
 
@@ -1256,6 +1257,7 @@ mod tests {
             &enr_key,
             &config,
             &EnrForkId::default(),
+            None,
             ForkDigest::default(),
         )
         .unwrap();

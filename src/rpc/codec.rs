@@ -203,7 +203,7 @@ impl<P: Preset> Decoder for SSZSnappyInboundCodec<P> {
         // packet size for ssz container corresponding to `self.protocol`.
         let ssz_limits = self
             .protocol
-            .rpc_request_limits(&self.chain_config, self.fork_context.current_fork());
+            .rpc_request_limits(&self.chain_config, self.fork_context.current_fork_name());
 
         if ssz_limits.is_out_of_bounds(length, self.max_packet_size) {
             return Err(RPCError::InvalidData(format!(
@@ -229,7 +229,7 @@ impl<P: Preset> Decoder for SSZSnappyInboundCodec<P> {
                     &self.chain_config,
                     self.protocol.versioned_protocol,
                     &decoded_buffer,
-                    self.fork_context.current_fork(),
+                    self.fork_context.current_fork_name(),
                 )
             }
             Err(e) => handle_error(e, reader.get_ref().get_ref().position(), max_compressed_len),
@@ -523,7 +523,7 @@ fn context_bytes<P: Preset>(
         if let RpcResponse::Success(rpc_variant) = resp {
             return rpc_variant.slot().map(|slot| {
                 let epoch = misc::compute_epoch_at_slot::<P>(slot);
-                fork_context.context_bytes_at_epoch(epoch)
+                fork_context.context_bytes(epoch)
             });
         }
     }
@@ -1052,7 +1052,7 @@ fn context_bytes_to_phase(
     fork_context: Arc<ForkContext>,
 ) -> Result<Phase, RPCError> {
     fork_context
-        .from_context_bytes(context_bytes)
+        .get_fork_from_context_bytes(context_bytes)
         .ok_or_else(|| {
             let encoded = hex::encode(context_bytes);
             RPCError::ErrorResponse(
@@ -1090,7 +1090,10 @@ mod tests {
         config::Config,
         deneb::containers::BlobIdentifier,
         fulu::containers::DataColumnsByRootIdentifier,
-        phase0::primitives::{ForkDigest, H256},
+        phase0::{
+            consts::GENESIS_EPOCH,
+            primitives::{ForkDigest, H256},
+        },
         preset::Mainnet,
     };
 
@@ -1313,7 +1316,11 @@ mod tests {
         let mut dst = BytesMut::new();
 
         // Add context bytes if required
-        dst.extend_from_slice(&fork_context.to_context_bytes(fork_name).unwrap().as_bytes());
+        dst.extend_from_slice(
+            &fork_context
+                .context_bytes(fork_context.current_fork_epoch())
+                .as_bytes(),
+        );
 
         let mut uvi_codec: Uvi<usize> = Uvi::default();
 
@@ -2020,8 +2027,7 @@ mod tests {
         let mut wrong_fork_bytes = BytesMut::new();
         wrong_fork_bytes.extend_from_slice(
             fork_context
-                .to_context_bytes(Phase::Altair)
-                .unwrap()
+                .context_bytes(config.altair_fork_epoch)
                 .as_bytes(),
         );
         wrong_fork_bytes.extend_from_slice(&encoded_bytes.split_off(4));
@@ -2049,12 +2055,7 @@ mod tests {
         .unwrap();
 
         let mut wrong_fork_bytes = BytesMut::new();
-        wrong_fork_bytes.extend_from_slice(
-            fork_context
-                .to_context_bytes(Phase::Phase0)
-                .unwrap()
-                .as_bytes(),
-        );
+        wrong_fork_bytes.extend_from_slice(fork_context.context_bytes(GENESIS_EPOCH).as_bytes());
         wrong_fork_bytes.extend_from_slice(&encoded_bytes.split_off(4));
 
         assert!(decode_response::<Mainnet>(
@@ -2080,8 +2081,7 @@ mod tests {
         let mut encoded_bytes = BytesMut::new();
         encoded_bytes.extend_from_slice(
             fork_context
-                .to_context_bytes(Phase::Altair)
-                .unwrap()
+                .context_bytes(config.altair_fork_epoch)
                 .as_bytes(),
         );
         encoded_bytes.extend_from_slice(
@@ -2295,8 +2295,7 @@ mod tests {
         // Insert context bytes
         dst.extend_from_slice(
             fork_context
-                .to_context_bytes(Phase::Altair)
-                .unwrap()
+                .context_bytes(config.altair_fork_epoch)
                 .as_bytes(),
         );
 

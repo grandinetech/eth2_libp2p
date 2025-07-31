@@ -4,6 +4,7 @@ use crate::{
     metrics, multiaddr::Multiaddr, types::Subnet, Enr, EnrExt, Gossipsub, PeerId, SyncInfo,
 };
 use eip_7594::compute_subnets_for_node;
+use helper_functions::misc;
 use itertools::Itertools as _;
 use peer_info::{ConnectionDirection, PeerConnectionStatus, PeerInfo};
 use score::{PeerAction, ReportSource, Score, ScoreState};
@@ -19,7 +20,8 @@ use std::{
 };
 use sync_status::SyncStatus;
 use types::config::Config as ChainConfig;
-use types::phase0::primitives::SubnetId;
+use types::phase0::primitives::{Epoch, SubnetId};
+use types::preset::Preset;
 
 pub mod client;
 pub mod peer_info;
@@ -267,6 +269,34 @@ impl PeerDB {
             .map(|(peer_id, _)| peer_id)
     }
 
+    /// Returns all the synced peers from the list of allowed peers that claim to have the block
+    /// components for the given epoch based on `status.earliest_available_slot`.
+    ///
+    /// If `earliest_available_slot` info is not available, then return peer anyway assuming it has the
+    /// required data.
+    pub fn synced_peers_for_epoch<'a, P: Preset>(
+        &'a self,
+        epoch: Epoch,
+        allowed_peers: &'a HashSet<PeerId>,
+    ) -> impl Iterator<Item = &'a PeerId> {
+        self.peers
+            .iter()
+            .filter(move |(peer_id, info)| {
+                allowed_peers.contains(peer_id)
+                    && info.is_connected()
+                    && match info.sync_status() {
+                        SyncStatus::Synced { info } => info.has_slot(
+                            misc::compute_start_slot_at_epoch::<P>(epoch + 1).saturating_sub(1),
+                        ),
+                        SyncStatus::Advanced { info } => info.has_slot(
+                            misc::compute_start_slot_at_epoch::<P>(epoch + 1).saturating_sub(1),
+                        ),
+                        _ => false,
+                    }
+            })
+            .map(|(peer_id, _)| peer_id)
+    }
+
     /// Gives the `peer_id` of all known connected and advanced peers.
     pub fn advanced_peers(&self) -> impl Iterator<Item = &PeerId> {
         self.peers
@@ -303,6 +333,23 @@ impl PeerDB {
                 // The custody_subnets hashset can be populated via enr or metadata
                 let is_custody_subnet_peer = info.is_assigned_to_custody_subnet(&subnet);
                 info.is_connected() && info.is_good_gossipsub_peer() && is_custody_subnet_peer
+            })
+            .map(|(peer_id, _)| peer_id)
+    }
+
+    /// Returns an iterator of all peers that are supposed to be custodying
+    /// the given subnet id that also belong to `allowed_peers`.
+    pub fn good_range_sync_custody_subnet_peer<'a>(
+        &'a self,
+        subnet: SubnetId,
+        allowed_peers: &'a HashSet<PeerId>,
+    ) -> impl Iterator<Item = &'a PeerId> {
+        self.peers
+            .iter()
+            .filter(move |(peer_id, info)| {
+                // The custody_subnets hashset can be populated via enr or metadata
+                let is_custody_subnet_peer = info.is_assigned_to_custody_subnet(&subnet);
+                allowed_peers.contains(peer_id) && info.is_connected() && is_custody_subnet_peer
             })
             .map(|(peer_id, _)| peer_id)
     }

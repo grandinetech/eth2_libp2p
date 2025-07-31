@@ -12,7 +12,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::time::Interval;
 use types::config::Config as ChainConfig;
-use types::nonstandard::Phase;
+use types::phase0::primitives::Epoch;
 use types::preset::Preset;
 
 /// Nanoseconds since a given time.
@@ -265,7 +265,7 @@ impl RPCRateLimiterBuilder {
 
 pub trait RateLimiterItem {
     fn protocol(&self) -> Protocol;
-    fn max_responses(&self, chain_config: &ChainConfig, current_phase: Phase) -> u64;
+    fn max_responses(&self, chain_config: &ChainConfig, epoch: Epoch) -> u64;
 }
 
 impl<P: Preset> RateLimiterItem for super::RequestType<P> {
@@ -273,8 +273,8 @@ impl<P: Preset> RateLimiterItem for super::RequestType<P> {
         self.versioned_protocol().protocol()
     }
 
-    fn max_responses(&self, chain_config: &ChainConfig, current_phase: Phase) -> u64 {
-        self.max_responses(chain_config, current_phase)
+    fn max_responses(&self, chain_config: &ChainConfig, epoch: Epoch) -> u64 {
+        self.max_responses(chain_config, epoch)
     }
 }
 
@@ -342,7 +342,7 @@ impl RPCRateLimiter {
         let tokens = request
             .max_responses(
                 self.fork_context.chain_config(),
-                self.fork_context.current_fork(),
+                self.fork_context.current_fork_epoch(),
             )
             .max(1);
 

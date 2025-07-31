@@ -859,7 +859,7 @@ where
         }
 
         let (req, substream) = substream;
-        let phase = self.fork_context.current_fork();
+        let phase = self.fork_context.current_fork_name();
         let chain_config = &self.fork_context.chain_config();
 
         match &req {
@@ -897,7 +897,8 @@ where
             _ => {}
         };
 
-        let max_responses = req.max_responses(&chain_config, self.fork_context.current_fork());
+        let max_responses =
+            req.max_responses(&chain_config, self.fork_context.current_fork_epoch());
 
         // store requests that expect responses
         if max_responses > 0 {
@@ -968,7 +969,8 @@ where
         let chain_config = &self.fork_context.chain_config();
 
         // add the stream to substreams if we expect a response, otherwise drop the stream.
-        let max_responses = request.max_responses(&chain_config, self.fork_context.current_fork());
+        let max_responses =
+            request.max_responses(&chain_config, self.fork_context.current_fork_epoch());
         if max_responses > 0 {
             let max_remaining_chunks = if request.expect_exactly_one_response() {
                 // Currently enforced only for multiple responses
