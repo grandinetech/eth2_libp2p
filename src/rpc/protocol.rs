@@ -31,7 +31,7 @@ use types::{
     config::Config as ChainConfig,
     eip7594::DataColumnSidecar,
     nonstandard::Phase,
-    preset::{Mainnet, Preset},
+    preset::{Mainnet, Preset, PresetName},
 };
 
 pub const SIGNED_BEACON_BLOCK_PHASE0_MIN: usize = 404;
@@ -41,6 +41,9 @@ pub const SIGNED_BEACON_BLOCK_BELLATRIX_MAX: usize = 1125899911195388;
 
 pub const BLOB_SIDECAR_MIN: usize = 131928;
 pub const BLOB_SIDECAR_MAX: usize = 131928;
+
+pub const BLOB_SIDECAR_MINIMAL_MIN: usize = 131704;
+pub const BLOB_SIDECAR_MINIMAL_MAX: usize = 131704;
 
 pub static DATA_COLUMN_MIN: LazyLock<usize> = LazyLock::new(|| {
     DataColumnSidecar::<Mainnet>::default()
@@ -877,7 +880,12 @@ impl std::fmt::Display for RPCError {
 impl std::error::Error for RPCError {}
 
 pub fn rpc_blob_limits<P: Preset>() -> RpcLimits {
-    RpcLimits::new(BLOB_SIDECAR_MIN, BLOB_SIDECAR_MAX)
+    match <P as Preset>::NAME {
+        PresetName::Minimal => RpcLimits::new(BLOB_SIDECAR_MINIMAL_MIN, BLOB_SIDECAR_MINIMAL_MAX),
+        PresetName::Mainnet | PresetName::Medalla => {
+            RpcLimits::new(BLOB_SIDECAR_MIN, BLOB_SIDECAR_MAX)
+        }
+    }
 }
 
 pub fn rpc_data_column_limits<P: Preset>(_phase: Phase) -> RpcLimits {
