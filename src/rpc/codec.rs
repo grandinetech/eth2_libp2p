@@ -203,7 +203,7 @@ impl<P: Preset> Decoder for SSZSnappyInboundCodec<P> {
         // packet size for ssz container corresponding to `self.protocol`.
         let ssz_limits = self
             .protocol
-            .rpc_request_limits(&self.chain_config, self.fork_context.current_fork_name());
+            .rpc_request_limits::<P>(&self.chain_config, self.fork_context.current_fork_name());
 
         if ssz_limits.is_out_of_bounds(length, self.max_packet_size) {
             return Err(RPCError::InvalidData(format!(
@@ -1205,7 +1205,7 @@ mod tests {
         })
     }
 
-    fn dcbrange_request() -> DataColumnsByRangeRequest {
+    fn dcbrange_request<P: Preset>() -> DataColumnsByRangeRequest<P> {
         DataColumnsByRangeRequest {
             start_slot: 0,
             count: 10,
@@ -1215,7 +1215,7 @@ mod tests {
         }
     }
 
-    fn dcbroot_request() -> DataColumnsByRootRequest {
+    fn dcbroot_request<P: Preset>() -> DataColumnsByRootRequest<P> {
         DataColumnsByRootRequest {
             data_column_ids: DynamicList::single(DataColumnsByRootIdentifier {
                 block_root: H256::zero(),
@@ -2162,8 +2162,8 @@ mod tests {
             RequestType::BlocksByRange(bbrange_request_v1()),
             RequestType::BlocksByRange(bbrange_request_v2()),
             RequestType::MetaData(MetadataRequest::new_v1()),
-            RequestType::DataColumnsByRange(dcbrange_request()),
-            RequestType::DataColumnsByRoot(dcbroot_request()),
+            RequestType::DataColumnsByRange(dcbrange_request::<Mainnet>()),
+            RequestType::DataColumnsByRoot(dcbroot_request::<Mainnet>()),
             RequestType::MetaData(MetadataRequest::new_v2()),
             RequestType::MetaData(MetadataRequest::new_v3()),
         ];
@@ -2481,7 +2481,7 @@ mod tests {
         ));
 
         // Request limits
-        let limit = protocol_id.rpc_request_limits(&config, Phase::Deneb);
+        let limit = protocol_id.rpc_request_limits::<Mainnet>(&config, Phase::Deneb);
         let mut max = encode_len(limit.max + 1);
         let mut codec = SSZSnappyOutboundCodec::<Mainnet>::new(
             protocol_id.clone(),

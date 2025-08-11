@@ -23,7 +23,6 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     fulu::{
-        consts::NumberOfColumns,
         containers::{DataColumnSidecar, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
@@ -560,22 +559,22 @@ impl BlocksByRangeRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Ssz)]
 /// Request a number of beacon data columns from a peer.
-pub struct DataColumnsByRangeRequest {
+pub struct DataColumnsByRangeRequest<P: Preset> {
     /// The starting slot to request data columns.
     pub start_slot: u64,
     /// The number of slots from the start slot.
     pub count: u64,
     /// The list column indices being requested.
-    pub columns: Arc<ContiguousList<ColumnIndex, NumberOfColumns>>,
+    pub columns: Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
 }
 
-impl DataColumnsByRangeRequest {
+impl<P: Preset> DataColumnsByRangeRequest<P> {
     pub fn max_requested(&self) -> u64 {
         self.count.saturating_mul(self.columns.len() as u64)
     }
 
     pub fn ssz_min_len() -> Result<usize> {
-        Ok(DataColumnsByRangeRequest {
+        Ok(DataColumnsByRangeRequest::<P> {
             start_slot: 0,
             count: 0,
             columns: Arc::new(ContiguousList::try_from(vec![0])?),
@@ -585,7 +584,7 @@ impl DataColumnsByRangeRequest {
     }
 
     pub fn ssz_max_len() -> Result<usize> {
-        Ok(DataColumnsByRangeRequest {
+        Ok(DataColumnsByRangeRequest::<P> {
             start_slot: 0,
             count: 0,
             columns: Arc::new(ContiguousList::full(0)),
@@ -774,15 +773,15 @@ impl BlobsByRootRequest {
 
 /// Request a number of data columns from a peer.
 #[derive(Clone, Debug, PartialEq)]
-pub struct DataColumnsByRootRequest {
+pub struct DataColumnsByRootRequest<P: Preset> {
     /// The list of beacon block roots and column indices being requested.
-    pub data_column_ids: DynamicList<DataColumnsByRootIdentifier>,
+    pub data_column_ids: DynamicList<DataColumnsByRootIdentifier<P>>,
 }
 
-impl DataColumnsByRootRequest {
+impl<P: Preset> DataColumnsByRootRequest<P> {
     pub fn new(
         config: &ChainConfig,
-        data_column_identifiers: impl Iterator<Item = DataColumnsByRootIdentifier>,
+        data_column_identifiers: impl Iterator<Item = DataColumnsByRootIdentifier<P>>,
     ) -> Self {
         let data_column_ids = DynamicList::from_iter_with_maximum(
             data_column_identifiers,
@@ -1156,7 +1155,7 @@ impl std::fmt::Display for BlobsByRangeRequest {
     }
 }
 
-impl std::fmt::Display for DataColumnsByRootRequest {
+impl<P: Preset> std::fmt::Display for DataColumnsByRootRequest<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -1166,7 +1165,7 @@ impl std::fmt::Display for DataColumnsByRootRequest {
     }
 }
 
-impl std::fmt::Display for DataColumnsByRangeRequest {
+impl<P: Preset> std::fmt::Display for DataColumnsByRangeRequest<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,

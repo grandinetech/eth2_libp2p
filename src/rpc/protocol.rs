@@ -428,7 +428,11 @@ impl AsRef<str> for ProtocolId {
 
 impl ProtocolId {
     /// Returns min and max size for messages of given protocol id requests.
-    pub fn rpc_request_limits(&self, chain_config: &ChainConfig, phase: Phase) -> RpcLimits {
+    pub fn rpc_request_limits<P: Preset>(
+        &self,
+        chain_config: &ChainConfig,
+        phase: Phase,
+    ) -> RpcLimits {
         match self.versioned_protocol.protocol() {
             Protocol::Status => {
                 RpcLimits::new(StatusMessageV1::SIZE.get(), StatusMessageV2::SIZE.get())
@@ -456,11 +460,11 @@ impl ProtocolId {
             Protocol::DataColumnsByRoot => RpcLimits::new(
                 0,
                 chain_config.max_request_blocks_deneb as usize
-                    * DataColumnsByRootIdentifier::SIZE.get(),
+                    * DataColumnsByRootIdentifier::<P>::SIZE.get(),
             ),
             Protocol::DataColumnsByRange => RpcLimits::new(
-                DataColumnsByRangeRequest::ssz_min_len().unwrap_or_default(),
-                DataColumnsByRangeRequest::ssz_max_len()
+                DataColumnsByRangeRequest::<P>::ssz_min_len().unwrap_or_default(),
+                DataColumnsByRangeRequest::<P>::ssz_max_len()
                     .expect("Unable to get DataColumnsByRange ssz_max_len"),
             ),
             Protocol::Ping => RpcLimits::new(Ping::SIZE.get(), Ping::SIZE.get()),
@@ -640,8 +644,8 @@ pub enum RequestType<P: Preset> {
     BlocksByRoot(BlocksByRootRequest),
     BlobsByRange(BlobsByRangeRequest),
     BlobsByRoot(BlobsByRootRequest),
-    DataColumnsByRoot(DataColumnsByRootRequest),
-    DataColumnsByRange(DataColumnsByRangeRequest),
+    DataColumnsByRoot(DataColumnsByRootRequest<P>),
+    DataColumnsByRange(DataColumnsByRangeRequest<P>),
     LightClientBootstrap(LightClientBootstrapRequest),
     LightClientOptimisticUpdate,
     LightClientFinalityUpdate,
