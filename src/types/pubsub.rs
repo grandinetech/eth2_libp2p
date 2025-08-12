@@ -72,7 +72,7 @@ pub enum PubsubMessage<P: Preset> {
     /// Gossipsub message providing notification of a light client optimistic update.
     LightClientOptimisticUpdate(Box<LightClientOptimisticUpdate<P>>),
     /// Gossipsub message providing notification of a signed inclusion list.
-    SignedInclusionList(Box<SignedInclusionList>),
+    SignedInclusionList(Arc<SignedInclusionList>),
 }
 
 // Implements the `DataTransform` trait of gossipsub to employ snappy compression
@@ -506,7 +506,7 @@ impl<P: Preset> PubsubMessage<P> {
                         let signed_inclusion_list =
                             SignedInclusionList::from_ssz_default(data)
                                 .map_err(|e| format!("{:?}", e))?;
-                        Ok(PubsubMessage::SignedInclusionList(Box::new(
+                        Ok(PubsubMessage::SignedInclusionList(Arc::new(
                             signed_inclusion_list,
                         )))
                     }
