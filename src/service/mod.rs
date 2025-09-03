@@ -10,8 +10,8 @@ use crate::peer_manager::{
 use crate::peer_manager::{MIN_OUTBOUND_ONLY_FACTOR, PEER_EXCESS_FACTOR, PRIORITY_PEER_EXCESS};
 use crate::rpc::methods::MetadataRequest;
 use crate::rpc::{
-    GoodbyeReason, HandlerErr, InboundRequestId, NetworkParams, Protocol, RPCError, RPCMessage,
-    RPCReceived, RequestType, ResponseTermination, RpcResponse, RpcSuccessResponse, RPC,
+    GoodbyeReason, HandlerErr, InboundRequestId, Protocol, RPCError, RPCMessage, RPCReceived,
+    RequestType, ResponseTermination, RpcResponse, RpcSuccessResponse, RPC,
 };
 use crate::types::{
     all_topics_at_fork, core_topics_to_subscribe, is_fork_non_core_topic, subnet_from_topic_hash,
@@ -403,11 +403,6 @@ impl<P: Preset> Network<P> {
             (gossipsub, update_gossipsub_scores)
         };
 
-        let network_params = NetworkParams {
-            max_payload_size: chain_config.max_payload_size,
-            ttfb_timeout: Duration::from_secs(chain_config.ttfb_timeout),
-            resp_timeout: Duration::from_secs(chain_config.resp_timeout),
-        };
         let eth2_rpc = RPC::new(
             chain_config.clone_arc(),
             ctx.fork_context.clone(),
@@ -415,7 +410,6 @@ impl<P: Preset> Network<P> {
             config.inbound_rate_limiter_config.clone(),
             config.outbound_rate_limiter_config.clone(),
             log.clone(),
-            network_params,
             seq_number,
         );
 
