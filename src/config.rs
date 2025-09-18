@@ -469,7 +469,8 @@ pub fn gossipsub_config(
             | Phase::Capella
             | Phase::Deneb
             | Phase::Electra
-            | Phase::Fulu => {
+            | Phase::Fulu
+            | Phase::Gloas => {
                 let topic_len_bytes = topic_bytes.len().to_le_bytes();
                 let mut vec = Vec::with_capacity(
                     prefix.len() + topic_len_bytes.len() + topic_bytes.len() + message.data.len(),
