@@ -34,6 +34,9 @@ pub const SYNC_COMMITTEE_PREFIX_TOPIC: &str = "sync_committee_";
 pub const BLS_TO_EXECUTION_CHANGE_TOPIC: &str = "bls_to_execution_change";
 pub const LIGHT_CLIENT_FINALITY_UPDATE: &str = "light_client_finality_update";
 pub const LIGHT_CLIENT_OPTIMISTIC_UPDATE: &str = "light_client_optimistic_update";
+pub const EXECUTION_PAYLOAD_TOPIC: &str = "execution_payload";
+pub const PAYLOAD_ATTESTATION_MESSAGE_TOPIC: &str = "payload_attestation_message";
+pub const EXECUTION_PAYLOAD_BID_TOPIC: &str = "execution_payload_bid";
 
 #[derive(Debug)]
 pub struct TopicConfig {
@@ -125,7 +128,10 @@ pub fn is_fork_non_core_topic(topic: &GossipTopic, _phase: Phase) -> bool {
         | GossipKind::SignedContributionAndProof
         | GossipKind::BlsToExecutionChange
         | GossipKind::LightClientFinalityUpdate
-        | GossipKind::LightClientOptimisticUpdate => false,
+        | GossipKind::LightClientOptimisticUpdate
+        | GossipKind::ExecutionPayload
+        | GossipKind::PayloadAttestationMessage
+        | GossipKind::ExecutionPayloadBid => false,
     }
 }
 
@@ -186,6 +192,12 @@ pub enum GossipKind {
     LightClientFinalityUpdate,
     /// Topic for publishing optimistic updates for light clients.
     LightClientOptimisticUpdate,
+    /// Topic for publishing execution payload envelopes.
+    ExecutionPayload,
+    /// Topic for publishing payload attestation messages.
+    PayloadAttestationMessage,
+    /// Topic for publishing execution payload bids.
+    ExecutionPayloadBid,
 }
 
 impl std::fmt::Display for GossipKind {
@@ -267,6 +279,9 @@ impl GossipTopic {
                 BLS_TO_EXECUTION_CHANGE_TOPIC => GossipKind::BlsToExecutionChange,
                 LIGHT_CLIENT_FINALITY_UPDATE => GossipKind::LightClientFinalityUpdate,
                 LIGHT_CLIENT_OPTIMISTIC_UPDATE => GossipKind::LightClientOptimisticUpdate,
+                EXECUTION_PAYLOAD_TOPIC => GossipKind::ExecutionPayload,
+                PAYLOAD_ATTESTATION_MESSAGE_TOPIC => GossipKind::PayloadAttestationMessage,
+                EXECUTION_PAYLOAD_BID_TOPIC => GossipKind::ExecutionPayloadBid,
                 topic => match subnet_topic_index(topic) {
                     Some(kind) => kind,
                     None => return Err(format!("Unknown topic: {}", topic)),
@@ -334,6 +349,9 @@ impl std::fmt::Display for GossipTopic {
             GossipKind::BlsToExecutionChange => BLS_TO_EXECUTION_CHANGE_TOPIC.into(),
             GossipKind::LightClientFinalityUpdate => LIGHT_CLIENT_FINALITY_UPDATE.into(),
             GossipKind::LightClientOptimisticUpdate => LIGHT_CLIENT_OPTIMISTIC_UPDATE.into(),
+            GossipKind::ExecutionPayload => EXECUTION_PAYLOAD_TOPIC.into(),
+            GossipKind::PayloadAttestationMessage => PAYLOAD_ATTESTATION_MESSAGE_TOPIC.into(),
+            GossipKind::ExecutionPayloadBid => EXECUTION_PAYLOAD_BID_TOPIC.into(),
         };
         write!(
             f,
