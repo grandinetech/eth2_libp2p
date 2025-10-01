@@ -44,6 +44,12 @@ pub struct GossipCache {
     light_client_finality_update: Option<Duration>,
     /// Timeout for light client optimistic updates.
     light_client_optimistic_update: Option<Duration>,
+    /// Timeout for execution payload envelopes.
+    execution_payload: Option<Duration>,
+    /// Timeout for payload attestation messages.
+    payload_attestation_message: Option<Duration>,
+    /// Timeout for execution payload bids.
+    execution_payload_bid: Option<Duration>,
 }
 
 #[derive(Default)]
@@ -75,6 +81,12 @@ pub struct GossipCacheBuilder {
     light_client_finality_update: Option<Duration>,
     /// Timeout for light client optimistic updates.
     light_client_optimistic_update: Option<Duration>,
+    /// Timeout for execution payload envelopes.
+    execution_payload: Option<Duration>,
+    /// Timeout for payload attestation messages.
+    payload_attestation_message: Option<Duration>,
+    /// Timeout for execution payload bids.
+    execution_payload_bid: Option<Duration>,
 }
 
 #[allow(dead_code)]
@@ -151,6 +163,24 @@ impl GossipCacheBuilder {
         self
     }
 
+    /// Timeout for execution payload messages.
+    pub fn execution_payload_timeout(mut self, timeout: Duration) -> Self {
+        self.execution_payload = Some(timeout);
+        self
+    }
+
+    /// Timeout for payload attestation messages.
+    pub fn payload_attestation_message_timeout(mut self, timeout: Duration) -> Self {
+        self.payload_attestation_message = Some(timeout);
+        self
+    }
+
+    /// Timeout for execution payload bid messages.
+    pub fn execution_payload_bid_timeout(mut self, timeout: Duration) -> Self {
+        self.execution_payload_bid = Some(timeout);
+        self
+    }
+
     pub fn build(self) -> GossipCache {
         let GossipCacheBuilder {
             default_timeout,
@@ -167,6 +197,9 @@ impl GossipCacheBuilder {
             bls_to_execution_change,
             light_client_finality_update,
             light_client_optimistic_update,
+            execution_payload,
+            payload_attestation_message,
+            execution_payload_bid,
         } = self;
         GossipCache {
             expirations: DelayQueue::default(),
@@ -184,6 +217,9 @@ impl GossipCacheBuilder {
             bls_to_execution_change: bls_to_execution_change.or(default_timeout),
             light_client_finality_update: light_client_finality_update.or(default_timeout),
             light_client_optimistic_update: light_client_optimistic_update.or(default_timeout),
+            execution_payload: execution_payload.or(default_timeout),
+            payload_attestation_message: payload_attestation_message.or(default_timeout),
+            execution_payload_bid: execution_payload_bid.or(default_timeout),
         }
     }
 }
@@ -211,6 +247,9 @@ impl GossipCache {
             GossipKind::BlsToExecutionChange => self.bls_to_execution_change,
             GossipKind::LightClientFinalityUpdate => self.light_client_finality_update,
             GossipKind::LightClientOptimisticUpdate => self.light_client_optimistic_update,
+            GossipKind::ExecutionPayload => self.execution_payload,
+            GossipKind::PayloadAttestationMessage => self.payload_attestation_message,
+            GossipKind::ExecutionPayloadBid => self.execution_payload_bid,
         };
         let Some(expire_timeout) = expire_timeout else {
             return;
