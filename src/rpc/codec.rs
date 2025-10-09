@@ -27,8 +27,12 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebSignedBeaconBlock},
     electra::containers::SignedBeaconBlock as ElectraSignedBeaconBlock,
-    fulu::containers::{DataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock},
-    gloas::containers::SignedBeaconBlock as GloasSignedBeaconBlock,
+    fulu::containers::{
+        DataColumnSidecar as FuluDataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock,
+    },
+    gloas::containers::{
+        DataColumnSidecar as GloasDataColumnSidecar, SignedBeaconBlock as GloasSignedBeaconBlock,
+    },
     nonstandard::Phase,
     phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::ForkDigest},
     preset::Preset,
@@ -744,9 +748,12 @@ fn handle_rpc_response<P: Preset>(
             )),
         },
         SupportedProtocol::DataColumnsByRootV1 => match fork_name {
-            Some(Phase::Fulu | Phase::Gloas) => Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
-                Arc::new(DataColumnSidecar::from_ssz_default(decoded_buffer)?),
-            ))),
+            Some(Phase::Gloas) => Ok(Some(RpcSuccessResponse::DataColumnsByRoot(Arc::new(
+                GloasDataColumnSidecar::from_ssz_default(decoded_buffer)?.into(),
+            )))),
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::DataColumnsByRoot(Arc::new(
+                FuluDataColumnSidecar::from_ssz_default(decoded_buffer)?.into(),
+            )))),
             Some(
                 Phase::Phase0
                 | Phase::Altair
@@ -767,9 +774,12 @@ fn handle_rpc_response<P: Preset>(
             )),
         },
         SupportedProtocol::DataColumnsByRangeV1 => match fork_name {
-            Some(Phase::Fulu | Phase::Gloas) => Ok(Some(RpcSuccessResponse::DataColumnsByRange(
-                Arc::new(DataColumnSidecar::from_ssz_default(decoded_buffer)?),
-            ))),
+            Some(Phase::Gloas) => Ok(Some(RpcSuccessResponse::DataColumnsByRange(Arc::new(
+                GloasDataColumnSidecar::from_ssz_default(decoded_buffer)?.into(),
+            )))),
+            Some(Phase::Fulu) => Ok(Some(RpcSuccessResponse::DataColumnsByRange(Arc::new(
+                FuluDataColumnSidecar::from_ssz_default(decoded_buffer)?.into(),
+            )))),
             Some(
                 Phase::Phase0
                 | Phase::Altair
@@ -1113,7 +1123,7 @@ mod tests {
             BeaconBlock as BellatrixBeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody,
             ExecutionPayload, SignedBeaconBlock as BellatrixSignedBeaconBlock,
         },
-        combined::SignedBeaconBlock,
+        combined::{DataColumnSidecar, SignedBeaconBlock},
         config::Config,
         deneb::containers::BlobIdentifier,
         fulu::containers::DataColumnsByRootIdentifier,
@@ -1148,13 +1158,19 @@ mod tests {
         Arc::new(blob_sidecar)
     }
 
-    fn empty_data_column_sidecar<P: Preset>(config: &Config) -> Arc<DataColumnSidecar<P>> {
+    fn empty_fulu_data_column_sidecar<P: Preset>(config: &Config) -> Arc<DataColumnSidecar<P>> {
         // The context bytes are now derived from the block epoch, so we need to have the slot set
         // here.
-        let mut data_column_sidecar = DataColumnSidecar::default();
+        let mut data_column_sidecar = FuluDataColumnSidecar::default();
         data_column_sidecar.signed_block_header.message.slot =
             misc::compute_start_slot_at_epoch::<P>(config.fulu_fork_epoch);
-        Arc::new(data_column_sidecar)
+        Arc::new(data_column_sidecar.into())
+    }
+
+    fn empty_gloas_data_column_sidecar<P: Preset>(config: &Config) -> Arc<DataColumnSidecar<P>> {
+        let mut data_column_sidecar = GloasDataColumnSidecar::default();
+        data_column_sidecar.slot = misc::compute_start_slot_at_epoch::<P>(config.gloas_fork_epoch);
+        Arc::new(data_column_sidecar.into())
     }
 
     /// Bellatrix block with length < max_rpc_size.
@@ -1693,12 +1709,12 @@ mod tests {
                 &config,
                 SupportedProtocol::DataColumnsByRangeV1,
                 RpcResponse::Success(RpcSuccessResponse::DataColumnsByRange(
-                    empty_data_column_sidecar(&config)
+                    empty_fulu_data_column_sidecar(&config)
                 )),
                 Phase::Fulu,
             ),
             Ok(Some(RpcSuccessResponse::DataColumnsByRange(
-                empty_data_column_sidecar(&config)
+                empty_fulu_data_column_sidecar(&config)
             ))),
         );
 
@@ -1707,12 +1723,12 @@ mod tests {
                 &config,
                 SupportedProtocol::DataColumnsByRangeV1,
                 RpcResponse::Success(RpcSuccessResponse::DataColumnsByRange(
-                    empty_data_column_sidecar(&config)
+                    empty_gloas_data_column_sidecar(&config)
                 )),
-                Phase::Fulu,
+                Phase::Gloas,
             ),
             Ok(Some(RpcSuccessResponse::DataColumnsByRange(
-                empty_data_column_sidecar(&config)
+                empty_gloas_data_column_sidecar(&config)
             ))),
         );
 
@@ -1721,12 +1737,12 @@ mod tests {
                 &config,
                 SupportedProtocol::DataColumnsByRootV1,
                 RpcResponse::Success(RpcSuccessResponse::DataColumnsByRoot(
-                    empty_data_column_sidecar(&config)
+                    empty_fulu_data_column_sidecar(&config)
                 )),
                 Phase::Fulu,
             ),
             Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
-                empty_data_column_sidecar(&config)
+                empty_fulu_data_column_sidecar(&config)
             ))),
         );
 
@@ -1735,12 +1751,12 @@ mod tests {
                 &config,
                 SupportedProtocol::DataColumnsByRootV1,
                 RpcResponse::Success(RpcSuccessResponse::DataColumnsByRoot(
-                    empty_data_column_sidecar(&config)
+                    empty_gloas_data_column_sidecar(&config)
                 )),
-                Phase::Fulu,
+                Phase::Gloas,
             ),
             Ok(Some(RpcSuccessResponse::DataColumnsByRoot(
-                empty_data_column_sidecar(&config)
+                empty_gloas_data_column_sidecar(&config)
             ))),
         );
     }
