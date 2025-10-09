@@ -11,13 +11,16 @@ use tracing::{Instrument, debug, error, info_span, warn};
 use try_from_iterator::TryFromIterator;
 use typenum::Unsigned as _;
 use types::deneb::containers::BlobSidecar;
-use types::fulu::containers::{DataColumnSidecar, DataColumnsByRootIdentifier};
+use types::fulu::containers::{
+    DataColumnSidecar as FuluDataColumnSidecar, DataColumnsByRootIdentifier,
+};
 use types::phase0::primitives::H32;
 use types::{
     bellatrix::containers::{
         BeaconBlock as BellatrixBeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody,
         ExecutionPayload, SignedBeaconBlock as BellatrixSignedBeaconBlock,
     },
+    combined::DataColumnSidecar,
     config::Config,
     nonstandard::Phase,
     phase0::{
@@ -955,10 +958,10 @@ async fn test_tcp_columns_by_root_chunked_rpc() {
     let rpc_request = RequestType::DataColumnsByRoot(req);
 
     // DataColumnsByRoot Response
-    let mut data_column_sidecar = DataColumnSidecar::default();
+    let mut data_column_sidecar = FuluDataColumnSidecar::default();
     data_column_sidecar.signed_block_header.message.slot =
         misc::compute_start_slot_at_epoch::<Mainnet>(config.fulu_fork_epoch);
-    let data_column = Arc::new(data_column_sidecar);
+    let data_column: Arc<DataColumnSidecar<Mainnet>> = Arc::new(data_column_sidecar.into());
 
     let rpc_response = Response::DataColumnsByRoot(Some(data_column.clone()));
 
@@ -1066,10 +1069,10 @@ async fn test_tcp_columns_by_range_chunked_rpc() {
     });
 
     // DataColumnsByRange Response
-    let mut data_column_sidecar = DataColumnSidecar::default();
+    let mut data_column_sidecar = FuluDataColumnSidecar::default();
     data_column_sidecar.signed_block_header.message.slot =
         misc::compute_start_slot_at_epoch::<Mainnet>(config.fulu_fork_epoch);
-    let data_column = Arc::new(data_column_sidecar);
+    let data_column: Arc<DataColumnSidecar<Mainnet>> = Arc::new(data_column_sidecar.into());
 
     let rpc_response = Response::DataColumnsByRange(Some(data_column.clone()));
 
