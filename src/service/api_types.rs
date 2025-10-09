@@ -3,11 +3,10 @@ use std::sync::Arc;
 
 use types::{
     combined::{
-        LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
-        LightClientUpdate, SignedBeaconBlock,
+        DataColumnSidecar, LightClientBootstrap, LightClientFinalityUpdate,
+        LightClientOptimisticUpdate, LightClientUpdate, SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
-    fulu::containers::DataColumnSidecar,
     preset::Preset,
 };
 

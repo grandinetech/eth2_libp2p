@@ -17,15 +17,12 @@ use types::deneb::containers::BlobIdentifier;
 use types::nonstandard::Phase;
 use types::{
     combined::{
-        LightClientBootstrap, LightClientFinalityUpdate, LightClientOptimisticUpdate,
-        LightClientUpdate, SignedBeaconBlock,
+        DataColumnSidecar, LightClientBootstrap, LightClientFinalityUpdate,
+        LightClientOptimisticUpdate, LightClientUpdate, SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    fulu::{
-        containers::{DataColumnSidecar, DataColumnsByRootIdentifier},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnsByRootIdentifier, primitives::ColumnIndex},
     phase0::primitives::{Epoch, ForkDigest, Slot, H256},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -1006,9 +1003,7 @@ impl<P: Preset> RpcSuccessResponse<P> {
                 Some(blob.signed_block_header.message.slot)
             }
             RpcSuccessResponse::DataColumnsByRange(column)
-            | RpcSuccessResponse::DataColumnsByRoot(column) => {
-                Some(column.signed_block_header.message.slot)
-            }
+            | RpcSuccessResponse::DataColumnsByRoot(column) => Some(column.slot()),
             RpcSuccessResponse::LightClientBootstrap(b) => Some(b.slot()),
             RpcSuccessResponse::LightClientOptimisticUpdate(update) => {
                 Some(update.signature_slot())

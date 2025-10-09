@@ -16,8 +16,8 @@ use types::{
     bellatrix::containers::SignedBeaconBlock as BellatrixBeaconBlock,
     capella::containers::{SignedBeaconBlock as CapellaBeaconBlock, SignedBlsToExecutionChange},
     combined::{
-        Attestation, AttesterSlashing, LightClientFinalityUpdate, LightClientOptimisticUpdate,
-        SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttesterSlashing, DataColumnSidecar, LightClientFinalityUpdate,
+        LightClientOptimisticUpdate, SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebBeaconBlock},
     electra::containers::{
@@ -25,8 +25,12 @@ use types::{
         SignedAggregateAndProof as ElectraSignedAggregateAndProof,
         SignedBeaconBlock as ElectraBeaconBlock,
     },
-    fulu::containers::{DataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock},
-    gloas::containers::SignedBeaconBlock as GloasSignedBeaconBlock,
+    fulu::containers::{
+        DataColumnSidecar as FuluDataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock,
+    },
+    gloas::containers::{
+        DataColumnSidecar as GloasDataColumnSidecar, SignedBeaconBlock as GloasSignedBeaconBlock,
+    },
     nonstandard::Phase,
     phase0::{
         containers::{
@@ -330,10 +334,22 @@ impl<P: Preset> PubsubMessage<P> {
                     }
                     GossipKind::DataColumnSidecar(subnet_id) => {
                         match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
-                            Some(Phase::Fulu | Phase::Gloas) => {
+                            Some(Phase::Gloas) => {
                                 let col_sidecar = Arc::new(
-                                    DataColumnSidecar::from_ssz_default(data)
-                                        .map_err(|e| format!("{:?}", e))?,
+                                    GloasDataColumnSidecar::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?
+                                        .into(),
+                                );
+                                Ok(PubsubMessage::DataColumnSidecar(Box::new((
+                                    *subnet_id,
+                                    col_sidecar,
+                                ))))
+                            }
+                            Some(Phase::Fulu) => {
+                                let col_sidecar = Arc::new(
+                                    FuluDataColumnSidecar::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?
+                                        .into(),
                                 );
                                 Ok(PubsubMessage::DataColumnSidecar(Box::new((
                                     *subnet_id,
@@ -590,7 +606,7 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
                 f,
                 "DataColumnSidecar: slot: {}, column index: {}",
                 data.1.slot(),
-                data.1.index,
+                data.1.index(),
             ),
             PubsubMessage::AggregateAndProofAttestation(att) => write!(
                 f,

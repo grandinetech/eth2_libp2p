@@ -20,7 +20,8 @@ use tokio_util::{
 };
 use typenum::Unsigned as _;
 use types::deneb::containers::BlobIdentifier;
-use types::fulu::containers::DataColumnSidecar;
+use types::fulu::containers::DataColumnSidecar as FuluDataColumnSidecar;
+use types::gloas::containers::DataColumnSidecar as GloasDataColumnSidecar;
 use types::phase0::primitives::Epoch;
 use types::{
     altair::containers::{
@@ -45,15 +46,29 @@ pub const BLOB_SIDECAR_MAX: usize = 131928;
 pub const BLOB_SIDECAR_MINIMAL_MIN: usize = 131704;
 pub const BLOB_SIDECAR_MINIMAL_MAX: usize = 131704;
 
-pub static DATA_COLUMN_MIN: LazyLock<usize> = LazyLock::new(|| {
-    DataColumnSidecar::<Mainnet>::default()
+pub static DATA_COLUMN_FULU_MIN: LazyLock<usize> = LazyLock::new(|| {
+    FuluDataColumnSidecar::<Mainnet>::default()
         .to_ssz()
         .expect("default DataColumnSidecar unavailable in SSZ")
         .len()
 });
 
-pub static DATA_COLUMN_MAX: LazyLock<usize> = LazyLock::new(|| {
-    DataColumnSidecar::<Mainnet>::full()
+pub static DATA_COLUMN_FULU_MAX: LazyLock<usize> = LazyLock::new(|| {
+    FuluDataColumnSidecar::<Mainnet>::full()
+        .to_ssz()
+        .expect("full DataColumnSidecar unavailable in SSZ")
+        .len()
+});
+
+pub static DATA_COLUMN_GLOAS_MIN: LazyLock<usize> = LazyLock::new(|| {
+    GloasDataColumnSidecar::<Mainnet>::default()
+        .to_ssz()
+        .expect("default DataColumnSidecar unavailable in SSZ")
+        .len()
+});
+
+pub static DATA_COLUMN_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
+    GloasDataColumnSidecar::<Mainnet>::full()
         .to_ssz()
         .expect("full DataColumnSidecar unavailable in SSZ")
         .len()
@@ -913,8 +928,12 @@ pub fn rpc_blob_limits<P: Preset>() -> RpcLimits {
     }
 }
 
-pub fn rpc_data_column_limits<P: Preset>(_phase: Phase) -> RpcLimits {
-    RpcLimits::new(*DATA_COLUMN_MIN, *DATA_COLUMN_MAX)
+pub fn rpc_data_column_limits<P: Preset>(phase: Phase) -> RpcLimits {
+    if phase >= Phase::Gloas {
+        RpcLimits::new(*DATA_COLUMN_GLOAS_MIN, *DATA_COLUMN_GLOAS_MAX)
+    } else {
+        RpcLimits::new(*DATA_COLUMN_FULU_MIN, *DATA_COLUMN_FULU_MAX)
+    }
 }
 
 impl<P: Preset> std::fmt::Display for RequestType<P> {
@@ -1027,16 +1046,35 @@ mod tests {
         assert_eq!(BLOB_SIDECAR_MAX, BlobSidecar::<Mainnet>::SIZE.get());
 
         assert_eq!(
-            *DATA_COLUMN_MIN,
-            DataColumnSidecar::<Mainnet>::default()
+            *DATA_COLUMN_FULU_MIN,
+            FuluDataColumnSidecar::<Mainnet>::default()
                 .to_ssz()
                 .unwrap()
                 .len(),
         );
 
         assert_eq!(
-            *DATA_COLUMN_MAX,
-            DataColumnSidecar::<Mainnet>::full().to_ssz().unwrap().len(),
+            *DATA_COLUMN_FULU_MAX,
+            FuluDataColumnSidecar::<Mainnet>::full()
+                .to_ssz()
+                .unwrap()
+                .len(),
+        );
+
+        assert_eq!(
+            *DATA_COLUMN_GLOAS_MIN,
+            GloasDataColumnSidecar::<Mainnet>::default()
+                .to_ssz()
+                .unwrap()
+                .len(),
+        );
+
+        assert_eq!(
+            *DATA_COLUMN_GLOAS_MAX,
+            GloasDataColumnSidecar::<Mainnet>::full()
+                .to_ssz()
+                .unwrap()
+                .len(),
         );
     }
 }
