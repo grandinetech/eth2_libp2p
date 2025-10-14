@@ -6,8 +6,8 @@ use crate::types::{BackFillState, SyncState};
 use crate::{Client, Enr, EnrExt, GossipTopic, Multiaddr, NetworkConfig, PeerId};
 use eip_7594::{compute_subnets_from_custody_group, get_custody_groups};
 use helper_functions::misc::compute_subnet_for_data_column_sidecar;
+use logging::error_with_peers;
 use parking_lot::RwLock;
-use slog::error;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std_ext::ArcExt as _;
@@ -51,7 +51,6 @@ impl NetworkGlobals {
         trusted_peers: Vec<PeerId>,
         disable_peer_scoring: bool,
         target_subnet_peers: usize,
-        log: &slog::Logger,
         network_config: Arc<NetworkConfig>,
     ) -> Self {
         let node_id = enr.node_id().raw();
@@ -60,10 +59,9 @@ impl NetworkGlobals {
             Some(cgc) if cgc <= config.number_of_custody_groups => cgc,
             _ => {
                 if config.is_peerdas_scheduled() {
-                    error!(
-                        log,
-                        "custody_group_count from metadata is either invalid or not set. This is a bug!";
-                        "info" => "falling back to default custody requirement",
+                    error_with_peers!(
+                        info = "falling back to default custody requirement",
+                        "custody_group_count from metadata is either invalid or not set. This is a bug!"
                     );
                 }
                 config.custody_requirement
@@ -89,12 +87,7 @@ impl NetworkGlobals {
             peer_id: RwLock::new(enr.peer_id()),
             listen_multiaddrs: RwLock::new(Vec::new()),
             local_metadata: RwLock::new(local_metadata),
-            peers: RwLock::new(PeerDB::new(
-                config,
-                trusted_peers,
-                disable_peer_scoring,
-                log,
-            )),
+            peers: RwLock::new(PeerDB::new(config, trusted_peers, disable_peer_scoring)),
             gossipsub_subscriptions: RwLock::new(HashSet::new()),
             sync_state: RwLock::new(SyncState::Stalled),
             backfill_state: RwLock::new(BackFillState::Paused),
@@ -251,7 +244,6 @@ impl NetworkGlobals {
     pub fn new_test_globals<P: Preset>(
         chain_config: Arc<ChainConfig>,
         trusted_peers: Vec<PeerId>,
-        log: &slog::Logger,
         network_config: Arc<NetworkConfig>,
     ) -> NetworkGlobals {
         let metadata = MetaData::V3(MetaDataV3 {
@@ -265,7 +257,6 @@ impl NetworkGlobals {
             chain_config,
             trusted_peers,
             metadata,
-            log,
             network_config,
         )
     }
@@ -274,7 +265,6 @@ impl NetworkGlobals {
         chain_config: Arc<ChainConfig>,
         trusted_peers: Vec<PeerId>,
         metadata: MetaData,
-        log: &slog::Logger,
         network_config: Arc<NetworkConfig>,
     ) -> NetworkGlobals {
         use crate::CombinedKeyExt;
@@ -288,7 +278,6 @@ impl NetworkGlobals {
             trusted_peers,
             false,
             3,
-            log,
             network_config,
         )
     }
@@ -296,29 +285,12 @@ impl NetworkGlobals {
 
 #[cfg(test)]
 mod test {
-    use slog::{o, Drain as _, Level};
     use types::preset::Mainnet;
 
     use super::*;
 
-    pub fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
-        let decorator = slog_term::TermDecorator::new().build();
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-
-        if enabled {
-            slog::Logger::root(drain.filter_level(level).fuse(), o!())
-        } else {
-            slog::Logger::root(drain.filter(|_| false).fuse(), o!())
-        }
-    }
-
     #[test]
     fn test_sampling_subnets() {
-        let log_level = Level::Debug;
-        let enable_logging = false;
-
-        let log = build_log(log_level, enable_logging);
         let mut chain_config = ChainConfig::mainnet();
         chain_config.fulu_fork_epoch = 0;
 
@@ -334,7 +306,6 @@ mod test {
             Arc::new(chain_config),
             vec![],
             metadata,
-            &log,
             config,
         );
         assert_eq!(

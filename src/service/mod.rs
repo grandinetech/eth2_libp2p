@@ -34,7 +34,9 @@ use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::{NetworkBehaviour, Swarm, SwarmEvent};
 use libp2p::upnp::tokio::Behaviour as Upnp;
 use libp2p::{identify, PeerId, SwarmBuilder};
-use slog::{crit, debug, error, info, o, trace, warn};
+use logging::{
+    crit, debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,
+};
 use std::num::{NonZeroU8, NonZeroUsize};
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -43,6 +45,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::usize;
 use std_ext::ArcExt as _;
+use tracing::instrument;
 use typenum::Unsigned as _;
 
 use types::{
@@ -173,25 +176,26 @@ pub struct Network<P: Preset> {
     gossip_cache: GossipCache,
     /// This node's PeerId.
     pub local_peer_id: PeerId,
-    /// Logger for behaviour actions.
-    log: slog::Logger,
 }
 
 /// Implements the combined behaviour for the libp2p service.
 impl<P: Preset> Network<P> {
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub async fn new(
         chain_config: Arc<ChainConfig>,
         executor: task_executor::TaskExecutor,
         mut ctx: ServiceContext<'_>,
         custody_group_count: u64,
-        log: &slog::Logger,
     ) -> Result<(Self, Arc<NetworkGlobals>)> {
-        let log = log.new(o!("service"=> "libp2p"));
-
         let config = ctx.config.clone();
-        trace!(log, "Libp2p Service starting");
+        trace_with_peers!("Libp2p Service starting");
         // initialise the node's ID
-        let local_keypair = utils::load_private_key(&config, &log);
+        let local_keypair = utils::load_private_key(&config);
 
         // Trusted peers will also be marked as explicit in GossipSub.
         // Cfr. https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md#explicit-peering-agreements
@@ -218,15 +222,11 @@ impl<P: Preset> Network<P> {
             &ctx.enr_fork_id,
             custody_group_count_opt,
             next_fork_digest,
-            &log,
         )?;
 
         // Construct the metadata
-        let meta_data = utils::load_or_build_metadata(
-            config.network_dir.as_deref(),
-            custody_group_count_opt,
-            &log,
-        );
+        let meta_data =
+            utils::load_or_build_metadata(config.network_dir.as_deref(), custody_group_count_opt);
         let seq_number = meta_data.seq_number();
         let globals = NetworkGlobals::new::<P>(
             chain_config.clone_arc(),
@@ -235,7 +235,6 @@ impl<P: Preset> Network<P> {
             trusted_peers,
             config.disable_peer_scoring,
             config.target_subnet_peers,
-            &log,
             config.clone_arc(),
         );
         let network_globals = Arc::new(globals);
@@ -409,7 +408,6 @@ impl<P: Preset> Network<P> {
             config.enable_light_client_server,
             config.inbound_rate_limiter_config.clone(),
             config.outbound_rate_limiter_config.clone(),
-            log.clone(),
             seq_number,
         );
 
@@ -420,7 +418,6 @@ impl<P: Preset> Network<P> {
                 local_keypair.clone(),
                 &config,
                 network_globals.clone(),
-                &log,
             )
             .await?;
             // start searching for peers
@@ -454,7 +451,7 @@ impl<P: Preset> Network<P> {
                 target_peer_count: config.target_peers,
                 ..Default::default()
             };
-            PeerManager::new::<P>(peer_manager_cfg, network_globals.clone(), &log)?
+            PeerManager::new::<P>(peer_manager_cfg, network_globals.clone())?
         };
 
         let connection_limits = {
@@ -549,7 +546,6 @@ impl<P: Preset> Network<P> {
             update_gossipsub_scores,
             gossip_cache,
             local_peer_id,
-            log,
         };
 
         network.start(&config).await?;
@@ -564,11 +560,26 @@ impl<P: Preset> Network<P> {
     /// - Starts listening in the given ports.
     /// - Dials boot-nodes and libp2p peers.
     /// - Subscribes to starting gossipsub topics.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     async fn start(&mut self, config: &crate::NetworkConfig) -> Result<()> {
         let enr = self.network_globals.local_enr();
-        info!(self.log, "Libp2p Starting"; "peer_id" => %enr.peer_id(), "bandwidth_config" => format!("{}-{}", config.network_load, NetworkLoad::from(config.network_load).name));
+        info_with_peers!(
+            peer_id = %enr.peer_id(),
+            bandwidth_config = format!("{}-{}", config.network_load, NetworkLoad::from(config.network_load).name),
+            "Libp2p Starting"
+        );
 
-        debug!(self.log, "Attempting to open listening ports"; config.listen_addrs(), "discovery_enabled" => !config.disable_discovery, "quic_enabled" => !config.disable_quic_support);
+        debug_with_peers!(
+            listen_addrs = ?config.listen_addrs(),
+            discovery_enabled = !config.disable_discovery,
+            quic_enabled = !config.disable_quic_support,
+            "Attempting to open listening ports"
+        );
 
         for listen_multiaddr in config.listen_addrs().libp2p_addresses() {
             // If QUIC is disabled, ignore listening on QUIC ports
@@ -582,14 +593,13 @@ impl<P: Preset> Network<P> {
                 Ok(_) => {
                     let mut log_address = listen_multiaddr;
                     log_address.push(MProtocol::P2p(enr.peer_id()));
-                    info!(self.log, "Listening established"; "address" => %log_address);
+                    info_with_peers!(address = %log_address, "Listening established");
                 }
                 Err(err) => {
                     crit!(
-                        self.log,
-                        "Unable to listen on libp2p address";
-                        "error" => ?err,
-                        "listen_multiaddr" => %listen_multiaddr,
+                        error = ?err,
+                        %listen_multiaddr,
+                        "Unable to listen on libp2p address"
                     );
                     return Err(anyhow!(
                         "Libp2p was unable to listen on the given listen address."
@@ -603,9 +613,9 @@ impl<P: Preset> Network<P> {
             // strip the p2p protocol if it exists
             strip_peer_id(&mut multiaddr);
             match self.swarm.dial(multiaddr.clone()) {
-                Ok(()) => debug!(self.log, "Dialing libp2p peer"; "address" => %multiaddr),
+                Ok(()) => debug_with_peers!(address = %multiaddr, "Dialing libp2p peer"),
                 Err(err) => {
-                    debug!(self.log, "Could not connect to peer"; "address" => %multiaddr, "error" => ?err)
+                    debug_with_peers!(address = %multiaddr, error = ?err, "Could not connect to peer")
                 }
             };
         };
@@ -668,12 +678,12 @@ impl<P: Preset> Network<P> {
             if self.subscribe_kind(topic_kind.clone()) {
                 subscribed_topics.push(topic_kind.clone());
             } else {
-                warn!(self.log, "Could not subscribe to topic"; "topic" => %topic_kind);
+                warn_with_peers!(topic = %topic_kind, "Could not subscribe to topic");
             }
         }
 
         if !subscribed_topics.is_empty() {
-            info!(self.log, "Subscribed to topics"; "topics" => ?subscribed_topics);
+            info_with_peers!(topics = ?subscribed_topics, "Subscribed to topics");
         }
 
         Ok(())
@@ -682,52 +692,124 @@ impl<P: Preset> Network<P> {
     /* Public Accessible Functions to interact with the behaviour */
 
     /// The routing pub-sub mechanism for eth2.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn gossipsub_mut(&mut self) -> &mut Gossipsub {
         &mut self.swarm.behaviour_mut().gossipsub
     }
     /// The Eth2 RPC specified in the wire-0 protocol.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn eth2_rpc_mut(&mut self) -> &mut RPC<AppRequestId, P> {
         &mut self.swarm.behaviour_mut().eth2_rpc
     }
     /// Discv5 Discovery protocol.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn discovery_mut(&mut self) -> &mut Discovery<P> {
         &mut self.swarm.behaviour_mut().discovery
     }
     /// Provides IP addresses and peer information.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn identify_mut(&mut self) -> &mut identify::Behaviour {
         &mut self.swarm.behaviour_mut().identify
     }
     /// The peer manager that keeps track of peer's reputation and status.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn peer_manager_mut(&mut self) -> &mut PeerManager {
         &mut self.swarm.behaviour_mut().peer_manager
     }
 
     /// The routing pub-sub mechanism for eth2.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn gossipsub(&self) -> &Gossipsub {
         &self.swarm.behaviour().gossipsub
     }
     /// The Eth2 RPC specified in the wire-0 protocol.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn eth2_rpc(&self) -> &RPC<AppRequestId, P> {
         &self.swarm.behaviour().eth2_rpc
     }
     /// Discv5 Discovery protocol.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn discovery(&self) -> &Discovery<P> {
         &self.swarm.behaviour().discovery
     }
     /// Provides IP addresses and peer information.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn identify(&self) -> &identify::Behaviour {
         &self.swarm.behaviour().identify
     }
     /// The peer manager that keeps track of peer's reputation and status.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn peer_manager(&self) -> &PeerManager {
         &self.swarm.behaviour().peer_manager
     }
 
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn network_globals(&self) -> &Arc<NetworkGlobals> {
         &self.network_globals
     }
 
     /// Returns the local ENR of the node.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn local_enr(&self) -> Enr {
         self.network_globals.local_enr()
     }
@@ -736,6 +818,12 @@ impl<P: Preset> Network<P> {
 
     /// Subscribes to a gossipsub topic kind, letting the network service determine the
     /// encoding and fork version.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn subscribe_kind(&mut self, kind: GossipKind) -> bool {
         let gossip_topic = GossipTopic::new(
             kind,
@@ -748,6 +836,12 @@ impl<P: Preset> Network<P> {
 
     /// Unsubscribes from a gossipsub topic kind, letting the network service determine the
     /// encoding and fork version.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn unsubscribe_kind(&mut self, kind: GossipKind) -> bool {
         let gossip_topic = GossipTopic::new(
             kind,
@@ -758,6 +852,12 @@ impl<P: Preset> Network<P> {
     }
 
     /// Subscribe to all required topics for the `phase` with the given `new_fork_digest`.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn subscribe_new_fork_topics(&mut self, phase: Phase, new_fork_digest: ForkDigest) {
         // Re-subscribe to non-core topics with the new fork digest
         let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
@@ -782,6 +882,12 @@ impl<P: Preset> Network<P> {
     }
 
     /// Unsubscribe from all topics that doesn't have the given fork_digest
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn unsubscribe_from_fork_topics_except(&mut self, except: ForkDigest) {
         let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
         for topic in subscriptions
@@ -794,6 +900,12 @@ impl<P: Preset> Network<P> {
     }
 
     /// Remove topic weight from all topics that don't have the given fork digest.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn remove_topic_weight_except(&mut self, except: ForkDigest) {
         let new_param = TopicScoreParams {
             topic_weight: 0.0,
@@ -809,9 +921,9 @@ impl<P: Preset> Network<P> {
                 .gossipsub_mut()
                 .set_topic_params(libp2p_topic, new_param.clone())
             {
-                Ok(_) => debug!(self.log, "Removed topic weight"; "topic" => %topic),
+                Ok(_) => debug_with_peers!(%topic, "Removed topic weight"),
                 Err(e) => {
-                    warn!(self.log, "Failed to remove topic weight"; "topic" => %topic, "error" => e)
+                    warn_with_peers!(%topic, error = e, "Failed to remove topic weight")
                 }
             }
         }
@@ -829,6 +941,12 @@ impl<P: Preset> Network<P> {
     }
 
     /// Returns the scoring parameters for a topic if set.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn get_topic_params(&self, topic: GossipTopic) -> Option<&TopicScoreParams> {
         self.swarm
             .behaviour()
@@ -839,6 +957,12 @@ impl<P: Preset> Network<P> {
     /// Subscribes to a gossipsub topic.
     ///
     /// Returns `true` if the subscription was successful and `false` otherwise.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn subscribe(&mut self, topic: GossipTopic) -> bool {
         // update the network globals
         self.network_globals
@@ -850,17 +974,23 @@ impl<P: Preset> Network<P> {
 
         match self.gossipsub_mut().subscribe(&topic) {
             Err(e) => {
-                warn!(self.log, "Failed to subscribe to topic"; "topic" => %topic, "error" => ?e);
+                warn_with_peers!(%topic, error = ?e, "Failed to subscribe to topic");
                 false
             }
             Ok(_) => {
-                debug!(self.log, "Subscribed to topic"; "topic" => %topic);
+                debug_with_peers!(%topic, "Subscribed to topic");
                 true
             }
         }
     }
 
     /// Unsubscribe from a gossipsub topic.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn unsubscribe(&mut self, topic: GossipTopic) -> bool {
         // update the network globals
         self.network_globals
@@ -873,18 +1003,24 @@ impl<P: Preset> Network<P> {
 
         match self.gossipsub_mut().unsubscribe(&libp2p_topic) {
             Err(_) => {
-                warn!(self.log, "Failed to unsubscribe from topic"; "topic" => %libp2p_topic);
+                warn_with_peers!(topic = %libp2p_topic, "Failed to unsubscribe from topic");
                 false
             }
             Ok(v) => {
                 // Inform the network
-                debug!(self.log, "Unsubscribed to topic"; "topic" => %topic);
+                debug_with_peers!(%topic, "Unsubscribed to topic");
                 v
             }
         }
     }
 
     /// Publishes message on the pubsub (gossipsub) behaviour, choosing the encoding.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn publish(&mut self, message: PubsubMessage<P>) {
         for topic in message.topics(GossipEncoding::default(), self.enr_fork_id.fork_digest) {
             let message_data = message.encode(GossipEncoding::default()).expect("TODO");
@@ -895,18 +1031,16 @@ impl<P: Preset> Network<P> {
             {
                 match e {
                     PublishError::Duplicate => {
-                        debug!(
-                            self.log,
-                            "Attempted to publish duplicate message";
-                            "kind" => %topic.kind(),
+                        debug_with_peers!(
+                            kind = %topic.kind(),
+                            "Attempted to publish duplicate message"
                         );
                     }
                     ref e => {
-                        warn!(
-                            self.log,
-                            "Could not publish message";
-                            "error" => ?e,
-                            "kind" => %topic.kind(),
+                        warn_with_peers!(
+                            error = ?e,
+                            kind = %topic.kind(),
+                            "Could not publish message"
                         );
                     }
                 }
@@ -940,6 +1074,12 @@ impl<P: Preset> Network<P> {
 
     /// Informs the gossipsub about the result of a message validation.
     /// If the message is valid it will get propagated by gossipsub.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn report_message_validation_result(
         &mut self,
         propagation_source: &PeerId,
@@ -970,12 +1110,23 @@ impl<P: Preset> Network<P> {
             propagation_source,
             validation_result,
         ) {
-            warn!(self.log, "Failed to report message validation"; "message_id" => %message_id, "peer_id" => %propagation_source, "error" => ?e);
+            warn_with_peers!(
+                message_id = %message_id,
+                peer_id = %propagation_source,
+                error = ?e,
+                "Failed to report message validation"
+            );
         }
     }
 
     /// Updates the current gossipsub scoring parameters based on the validator count and current
     /// slot.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn update_gossipsub_parameters(
         &mut self,
         active_validators: u64,
@@ -990,12 +1141,12 @@ impl<P: Preset> Network<P> {
             GossipTopic::new(kind, GossipEncoding::default(), fork_digest).into()
         };
 
-        debug!(self.log, "Updating gossipsub score parameters";
-            "active_validators" => active_validators);
-        trace!(self.log, "Updated gossipsub score parameters";
-            "beacon_block_params" => ?beacon_block_params,
-            "beacon_aggregate_proof_params" => ?beacon_aggregate_proof_params,
-            "beacon_attestation_subnet_params" => ?beacon_attestation_subnet_params,
+        debug_with_peers!(active_validators, "Updating gossipsub score parameters");
+        trace_with_peers!(
+            ?beacon_block_params,
+            ?beacon_aggregate_proof_params,
+            ?beacon_attestation_subnet_params,
+            "Updated gossipsub score parameters"
         );
 
         self.gossipsub_mut()
@@ -1024,6 +1175,12 @@ impl<P: Preset> Network<P> {
     /* Eth2 RPC behaviour functions */
 
     /// Send a request to a peer over RPC.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn send_request(
         &mut self,
         peer_id: PeerId,
@@ -1041,6 +1198,12 @@ impl<P: Preset> Network<P> {
     }
 
     /// Send a successful response to a peer over RPC.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn send_response<T: Into<RpcResponse<P>>>(
         &mut self,
         peer_id: PeerId,
@@ -1052,12 +1215,8 @@ impl<P: Preset> Network<P> {
             .send_response(inbound_request_id, response.into())
         {
             if self.network_globals.peers.read().is_connected(&peer_id) {
-                error!(
-                    self.log,
-                    "Request not found in RPC active requests";
-                    "peer_id" => %peer_id,
-                    "inbound_request_id" => ?inbound_request_id,
-                    "response" => %response,
+                error_with_peers!(%peer_id, ?inbound_request_id, %response,
+                    "Request not found in RPC active requests"
                 );
             }
         }
@@ -1065,10 +1224,22 @@ impl<P: Preset> Network<P> {
 
     /* Peer management functions */
 
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn testing_dial(&mut self, addr: Multiaddr) -> Result<(), libp2p::swarm::DialError> {
         self.swarm.dial(addr)
     }
 
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn report_peer(
         &mut self,
         peer_id: &PeerId,
@@ -1084,6 +1255,12 @@ impl<P: Preset> Network<P> {
     ///
     /// This will send a goodbye, disconnect and then ban the peer.
     /// This is fatal for a peer, and should be used in unrecoverable circumstances.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn goodbye_peer(&mut self, peer_id: &PeerId, reason: GoodbyeReason, source: ReportSource) {
         self.peer_manager_mut()
             .goodbye_peer(peer_id, reason, source);
@@ -1091,16 +1268,34 @@ impl<P: Preset> Network<P> {
 
     /// Hard (ungraceful) disconnect for testing purposes only
     /// Use goodbye_peer for disconnections, do not use this function.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn __hard_disconnect_testing_only(&mut self, peer_id: PeerId) {
         let _ = self.swarm.disconnect_peer_id(peer_id);
     }
 
     /// Returns an iterator over all enr entries in the DHT.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn enr_entries(&self) -> Vec<Enr> {
         self.discovery().table_entries_enr()
     }
 
     /// Add an ENR to the routing table of the discovery mechanism.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn add_enr(&mut self, enr: Enr) {
         self.discovery_mut().add_enr(enr);
     }
@@ -1108,9 +1303,15 @@ impl<P: Preset> Network<P> {
     /// Updates a subnet value to the ENR attnets/syncnets bitfield.
     ///
     /// The `value` is `true` if a subnet is being added and false otherwise.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn update_enr_subnet(&mut self, subnet_id: Subnet, value: bool) {
         if let Err(e) = self.discovery_mut().update_enr_bitfield(subnet_id, value) {
-            crit!(self.log, "Could not update ENR bitfield"; "error" => ?e);
+            crit!(error = ?e, "Could not update ENR bitfield");
         }
         // update the local meta data which informs our peers of the update during PINGS
         self.update_metadata_bitfields();
@@ -1119,7 +1320,7 @@ impl<P: Preset> Network<P> {
     /// Updates the cgc value in the ENR.
     pub fn update_enr_cgc(&mut self, new_custody_group_count: u64) {
         if let Err(e) = self.discovery_mut().update_enr_cgc(new_custody_group_count) {
-            crit!(self.log, "Could not update cgc in ENR"; "error" => ?e);
+            crit!(error = ?e, "Could not update cgc in ENR");
         }
         // update the local meta data which informs our peers of the update during PINGS
         self.update_metadata_cgc(new_custody_group_count);
@@ -1127,6 +1328,12 @@ impl<P: Preset> Network<P> {
 
     /// Attempts to discover new peers for a given subnet. The `min_ttl` gives the time at which we
     /// would like to retain the peers for.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn discover_subnet_peers(&mut self, subnets_to_discover: Vec<SubnetDiscovery>) {
         // If discovery is not started or disabled, ignore the request
         if !self.discovery().started {
@@ -1156,13 +1363,12 @@ impl<P: Preset> Network<P> {
                     .good_peers_on_subnet(s.subnet)
                     .count();
                 if peers_on_subnet >= self.network_globals.target_subnet_peers {
-                    trace!(
-                        self.log,
-                        "Discovery query ignored";
-                        "subnet" => ?s.subnet,
-                        "reason" => "Already connected to desired peers",
-                        "connected_peers_on_subnet" => peers_on_subnet,
-                        "target_subnet_peers" => self.network_globals.target_subnet_peers,
+                    trace_with_peers!(
+                        subnet = ?s.subnet,
+                        reason = "Already connected to desired peers",
+                        connected_peers_on_subnet = peers_on_subnet,
+                        target_subnet_peers = self.network_globals.target_subnet_peers,
+                        "Discovery query ignored"
                     );
                     false
                 // Queue an outgoing connection request to the cached peers that are on `s.subnet_id`.
@@ -1182,6 +1388,12 @@ impl<P: Preset> Network<P> {
     }
 
     /// Updates the local ENR's "eth2" field with the latest EnrForkId.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn update_fork_version(&mut self, enr_fork_id: EnrForkId) {
         self.discovery_mut().update_eth2_enr(enr_fork_id.clone());
 
@@ -1192,13 +1404,19 @@ impl<P: Preset> Network<P> {
     /// Updates the local ENR's "nfd" field to `next_fork_digest`.
     pub fn update_nfd(&mut self, next_fork_digest: ForkDigest) {
         if let Err(e) = self.discovery_mut().update_enr_nfd(next_fork_digest) {
-            crit!(self.log, "Could not update ENR next fork digest"; "error" => ?e);
+            crit!(error = ?e, "Could not update ENR next fork digest");
         }
     }
 
     /* Private internal functions */
 
     /// Updates the current meta data of the node to match the local ENR.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn update_metadata_bitfields(&mut self) {
         let local_attnets = self
             .discovery_mut()
@@ -1226,7 +1444,7 @@ impl<P: Preset> Network<P> {
         drop(meta_data_w);
         self.eth2_rpc_mut().update_seq_number(seq_number);
         // Save the updated metadata to disk
-        utils::save_metadata_to_disk(self.network_dir.as_deref(), meta_data, &self.log);
+        utils::save_metadata_to_disk(self.network_dir.as_deref(), meta_data);
     }
 
     /// Update the current custody group count in meta data of the node to match the local ENR.
@@ -1244,15 +1462,27 @@ impl<P: Preset> Network<P> {
         drop(meta_data_w);
         self.eth2_rpc_mut().update_seq_number(seq_number);
         // Save the updated metadata to disk
-        utils::save_metadata_to_disk(self.network_dir.as_deref(), meta_data, &self.log);
+        utils::save_metadata_to_disk(self.network_dir.as_deref(), meta_data);
     }
 
     /// Sends a Ping request to the peer.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn ping(&mut self, peer_id: PeerId) {
         self.eth2_rpc_mut().ping(peer_id, AppRequestId::Internal);
     }
 
     /// Sends a METADATA request to a peer.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn send_meta_data_request(&mut self, peer_id: PeerId) {
         let event = if self.network_globals.config.is_peerdas_scheduled() {
             // Nodes with higher custody will probably start advertising it
@@ -1269,6 +1499,12 @@ impl<P: Preset> Network<P> {
     // RPC Propagation methods
     /// Queues the response to be sent upwards as long at it was requested outside the Behaviour.
     #[must_use = "return the response"]
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn build_response(
         &mut self,
         app_request_id: AppRequestId,
@@ -1287,8 +1523,14 @@ impl<P: Preset> Network<P> {
 
     /// Dial cached Enrs in discovery service that are in the given `subnet_id` and aren't
     /// in Connected, Dialing or Banned state.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn dial_cached_enrs_in_subnet(&mut self, chain_config: Arc<ChainConfig>, subnet: Subnet) {
-        let predicate = subnet_predicate::<P>(chain_config, vec![subnet], &self.log);
+        let predicate = subnet_predicate::<P>(chain_config, vec![subnet]);
         let peers_to_dial: Vec<Enr> = self
             .discovery()
             .cached_enrs()
@@ -1306,13 +1548,19 @@ impl<P: Preset> Network<P> {
             self.discovery_mut().remove_cached_enr(&enr.peer_id());
             let peer_id = enr.peer_id();
             if self.peer_manager_mut().dial_peer(enr) {
-                debug!(self.log, "Added cached ENR peer to dial queue"; "peer_id" => %peer_id);
+                debug_with_peers!(%peer_id, "Added cached ENR peer to dial queue");
             }
         }
     }
 
     /// Adds the given `enr` to the trusted peers mapping and tries to dial it
     /// every heartbeat to maintain the connection.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn dial_trusted_peer(&mut self, enr: Enr) {
         self.peer_manager_mut().add_trusted_peer(enr.clone());
         self.peer_manager_mut().dial_peer(enr);
@@ -1320,6 +1568,12 @@ impl<P: Preset> Network<P> {
 
     /// Remove the given peer from the trusted peers mapping if it exists and disconnect
     /// from it.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub fn remove_trusted_peer(&mut self, enr: Enr) {
         self.peer_manager_mut().remove_trusted_peer(enr.clone());
         self.peer_manager_mut()
@@ -1329,6 +1583,12 @@ impl<P: Preset> Network<P> {
     /* Sub-behaviour event handling functions */
 
     /// Handle a gossipsub event.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn inject_gs_event(&mut self, event: gossipsub::Event) -> Option<NetworkEvent<P>> {
         match event {
             gossipsub::Event::Message {
@@ -1340,14 +1600,19 @@ impl<P: Preset> Network<P> {
                 // peer that originally published the message.
                 match PubsubMessage::decode(&gs_msg.topic, &gs_msg.data, &self.fork_context) {
                     Err(e) => {
-                        debug!(self.log, "Could not decode gossipsub message"; "topic" => ?gs_msg.topic,"error" => e);
+                        debug_with_peers!(topic = ?gs_msg.topic, error = e, "Could not decode gossipsub message");
                         //reject the message
                         if let Err(e) = self.gossipsub_mut().report_message_validation_result(
                             &id,
                             &propagation_source,
                             MessageAcceptance::Reject,
                         ) {
-                            warn!(self.log, "Failed to report message validation"; "message_id" => %id, "peer_id" => %propagation_source, "error" => ?e);
+                            warn_with_peers!(
+                                message_id = %id,
+                                peer_id = %propagation_source,
+                                error = ?e,
+                                "Failed to report message validation"
+                            );
                         }
                     }
                     Ok(msg) => {
@@ -1380,22 +1645,21 @@ impl<P: Preset> Network<P> {
                                 .publish(Topic::from(topic.clone()), data)
                             {
                                 Ok(_) => {
-                                    debug!(
-                                        self.log,
-                                        "Gossip message published on retry";
-                                        "topic" => topic_str
+                                    debug_with_peers!(
+                                        topic = topic_str,
+                                        "Gossip message published on retry"
                                     );
+
                                     metrics::inc_counter_vec(
                                         &metrics::GOSSIP_LATE_PUBLISH_PER_TOPIC_KIND,
                                         &[topic_str],
                                     );
                                 }
                                 Err(PublishError::Duplicate) => {
-                                    debug!(
-                                        self.log,
-                                        "Gossip message publish ignored on retry";
-                                        "reason" => "duplicate",
-                                        "topic" => topic_str
+                                    debug_with_peers!(
+                                        reason = "duplicate",
+                                        topic = topic_str,
+                                        "Gossip message publish ignored on retry"
                                     );
                                     metrics::inc_counter_vec(
                                         &metrics::GOSSIP_FAILED_LATE_PUBLISH_PER_TOPIC_KIND,
@@ -1403,11 +1667,10 @@ impl<P: Preset> Network<P> {
                                     );
                                 }
                                 Err(e) => {
-                                    warn!(
-                                        self.log,
-                                        "Gossip message publish failed on retry";
-                                        "topic" => topic_str,
-                                        "error" => %e
+                                    warn_with_peers!(
+                                        topic = topic_str,
+                                        error = %e,
+                                        "Gossip message publish failed on retry"
                                     );
                                     metrics::inc_counter_vec(
                                         &metrics::GOSSIP_FAILED_LATE_PUBLISH_PER_TOPIC_KIND,
@@ -1428,7 +1691,7 @@ impl<P: Preset> Network<P> {
                 }
             }
             gossipsub::Event::GossipsubNotSupported { peer_id } => {
-                debug!(self.log, "Peer does not support gossipsub"; "peer_id" => %peer_id);
+                debug_with_peers!(%peer_id, "Peer does not support gossipsub");
                 self.peer_manager_mut().report_peer(
                     &peer_id,
                     PeerAction::Fatal,
@@ -1441,10 +1704,16 @@ impl<P: Preset> Network<P> {
                 peer_id,
                 failed_messages,
             } => {
-                debug!(self.log, "Slow gossipsub peer"; "peer_id" => %peer_id, "publish" => failed_messages.publish, "forward" => failed_messages.forward, "priority" => failed_messages.priority, "non_priority" => failed_messages.non_priority);
-                // Punish the peer if it cannot handle priority messages
+                debug_with_peers!(
+                    peer_id = %peer_id,
+                    publish = failed_messages.publish,
+                    forward = failed_messages.forward,
+                    priority = failed_messages.priority,
+                    non_priority = failed_messages.non_priority,
+                    "Slow gossipsub peer"
+                ); // Punish the peer if it cannot handle priority messages
                 if failed_messages.total_timeout() > 10 {
-                    debug!(self.log, "Slow gossipsub peer penalized for priority failure"; "peer_id" => %peer_id);
+                    debug_with_peers!(%peer_id, "Slow gossipsub peer penalized for priority failure");
                     self.peer_manager_mut().report_peer(
                         &peer_id,
                         PeerAction::HighToleranceError,
@@ -1453,7 +1722,7 @@ impl<P: Preset> Network<P> {
                         "publish_timeout_penalty",
                     );
                 } else if failed_messages.total_queue_full() > 10 {
-                    debug!(self.log, "Slow gossipsub peer penalized for send queue full"; "peer_id" => %peer_id);
+                    debug_with_peers!(%peer_id, "Slow gossipsub peer penalized for send queue full");
                     self.peer_manager_mut().report_peer(
                         &peer_id,
                         PeerAction::HighToleranceError,
@@ -1468,6 +1737,12 @@ impl<P: Preset> Network<P> {
     }
 
     /// Handle an RPC event.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn inject_rpc_event(&mut self, event: RPCMessage<AppRequestId, P>) -> Option<NetworkEvent<P>> {
         let peer_id = event.peer_id;
 
@@ -1477,11 +1752,7 @@ impl<P: Preset> Network<P> {
             && (matches!(event.message, Err(HandlerErr::Inbound { .. }))
                 || matches!(event.message, Ok(RPCReceived::Request(..))))
         {
-            debug!(
-                self.log,
-                "Ignoring rpc message of disconnecting peer";
-                event
-            );
+            debug_with_peers!(?event, "Ignoring rpc message of disconnecting peer");
             return None;
         }
 
@@ -1546,11 +1817,11 @@ impl<P: Preset> Network<P> {
                     }
                     RequestType::Goodbye(reason) => {
                         // queue for disconnection without a goodbye message
-                        debug!(
-                            self.log, "Peer sent Goodbye";
-                            "peer_id" => %peer_id,
-                            "reason" => %reason,
-                            "client" => %self.network_globals.client(&peer_id),
+                        debug_with_peers!(
+                            %peer_id,
+                            %reason,
+                            client = %self.network_globals.client(&peer_id),
+                            "Peer sent Goodbye"
                         );
                         // NOTE: We currently do not inform the application that we are
                         // disconnecting here. The RPC handler will automatically
@@ -1763,6 +2034,12 @@ impl<P: Preset> Network<P> {
     }
 
     /// Handle an identify event.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn inject_identify_event(&mut self, event: identify::Event) -> Option<NetworkEvent<P>> {
         match event {
             identify::Event::Received {
@@ -1771,10 +2048,7 @@ impl<P: Preset> Network<P> {
                 connection_id: _,
             } => {
                 if info.listen_addrs.len() > MAX_IDENTIFY_ADDRESSES {
-                    debug!(
-                        self.log,
-                        "More than 10 addresses have been identified, truncating"
-                    );
+                    debug_with_peers!("More than 10 addresses have been identified, truncating");
                     info.listen_addrs.truncate(MAX_IDENTIFY_ADDRESSES);
                 }
                 // send peer info to the peer manager.
@@ -1788,6 +2062,12 @@ impl<P: Preset> Network<P> {
     }
 
     /// Handle a peer manager event.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn inject_pm_event(&mut self, event: PeerManagerEvent) -> Option<NetworkEvent<P>> {
         match event {
             PeerManagerEvent::PeerConnectedIncoming(peer_id) => {
@@ -1832,8 +2112,7 @@ impl<P: Preset> Network<P> {
                 None
             }
             PeerManagerEvent::DisconnectPeer(peer_id, reason) => {
-                debug!(self.log, "Peer Manager disconnecting peer";
-                       "peer_id" => %peer_id, "reason" => %reason);
+                debug_with_peers!(%peer_id, %reason, "Peer Manager disconnecting peer");
                 // send one goodbye
                 self.eth2_rpc_mut()
                     .shutdown(peer_id, AppRequestId::Internal, reason);
@@ -1842,10 +2121,16 @@ impl<P: Preset> Network<P> {
         }
     }
 
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn inject_upnp_event(&mut self, event: libp2p::upnp::Event) {
         match event {
             libp2p::upnp::Event::NewExternalAddr(addr) => {
-                info!(self.log, "UPnP route established"; "addr" => %addr);
+                info_with_peers!(%addr, "UPnP route established");
                 let mut iter = addr.iter();
                 let is_ip6 = {
                     let addr = iter.next();
@@ -1857,38 +2142,41 @@ impl<P: Preset> Network<P> {
                             if let Err(e) =
                                 self.discovery_mut().update_enr_quic_port(udp_port, is_ip6)
                             {
-                                warn!(self.log, "Failed to update ENR"; "error" => e);
+                                warn_with_peers!(error = e, "Failed to update ENR");
                             }
                         }
                         _ => {
-                            trace!(self.log, "UPnP address mapped multiaddr from unknown transport"; "addr" => %addr)
+                            trace_with_peers!(%addr, "UPnP address mapped multiaddr from unknown transport");
                         }
                     },
                     Some(multiaddr::Protocol::Tcp(tcp_port)) => {
                         if let Err(e) = self.discovery_mut().update_enr_tcp_port(tcp_port, is_ip6) {
-                            warn!(self.log, "Failed to update ENR"; "error" => e);
+                            warn_with_peers!(error = e, "Failed to update ENR");
                         }
                     }
                     _ => {
-                        trace!(self.log, "UPnP address mapped multiaddr from unknown transport"; "addr" => %addr);
+                        trace_with_peers!(%addr, "UPnP address mapped multiaddr from unknown transport");
                     }
                 }
             }
             libp2p::upnp::Event::ExpiredExternalAddr(_) => {}
             libp2p::upnp::Event::GatewayNotFound => {
-                info!(self.log, "UPnP not available");
+                info_with_peers!("UPnP not available");
             }
             libp2p::upnp::Event::NonRoutableGateway => {
-                info!(
-                    self.log,
-                    "UPnP is available but gateway is not exposed to public network"
-                );
+                info_with_peers!("UPnP is available but gateway is not exposed to public network");
             }
         }
     }
 
     /* Networking polling */
 
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     pub async fn next_event(&mut self) -> NetworkEvent<P> {
         loop {
             tokio::select! {
@@ -1908,7 +2196,7 @@ impl<P: Preset> Network<P> {
                 // poll the gossipsub cache to clear expired messages
                 Some(result) = self.gossip_cache.next() => {
                     match result {
-                        Err(e) => warn!(self.log, "Gossip cache error"; "error" => e),
+                        Err(e) => warn_with_peers!(error = e, "Gossip cache error"),
                         Ok(expired_topic) => {
                             if let Some(v) = metrics::get_int_counter(
                                 &metrics::GOSSIP_EXPIRED_LATE_PUBLISH_PER_TOPIC_KIND,
@@ -1923,6 +2211,12 @@ impl<P: Preset> Network<P> {
         }
     }
 
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p"),
+        name = "libp2p",
+        skip_all
+    )]
     fn parse_swarm_event(
         &mut self,
         event: SwarmEvent<BehaviourEvent<P>>,
@@ -1956,7 +2250,7 @@ impl<P: Preset> Network<P> {
                 send_back_addr,
                 connection_id: _,
             } => {
-                trace!(self.log, "Incoming connection"; "our_addr" => %local_addr, "from" => %send_back_addr);
+                trace_with_peers!(our_addr = %local_addr, from = %send_back_addr, "Incoming connection");
                 None
             }
             SwarmEvent::IncomingConnectionError {
@@ -1987,7 +2281,7 @@ impl<P: Preset> Network<P> {
                         }
                     },
                 };
-                debug!(self.log, "Failed incoming connection"; "our_addr" => %local_addr, "from" => %send_back_addr, "error" => error_repr);
+                debug_with_peers!(our_addr = %local_addr, from = %send_back_addr, error = error_repr, "Failed incoming connection");
                 None
             }
             SwarmEvent::OutgoingConnectionError {
@@ -2002,7 +2296,7 @@ impl<P: Preset> Network<P> {
             }
             SwarmEvent::NewListenAddr { address, .. } => Some(NetworkEvent::NewListenAddr(address)),
             SwarmEvent::ExpiredListenAddr { address, .. } => {
-                debug!(self.log, "Listen address expired"; "address" => %address);
+                debug_with_peers!(%address, "Listen address expired");
                 None
             }
             SwarmEvent::ListenerClosed {
@@ -2010,10 +2304,10 @@ impl<P: Preset> Network<P> {
             } => {
                 match reason {
                     Ok(_) => {
-                        debug!(self.log, "Listener gracefully closed"; "addresses" => ?addresses)
+                        debug_with_peers!(?addresses, "Listener gracefully closed")
                     }
                     Err(reason) => {
-                        crit!(self.log, "Listener abruptly closed"; "addresses" => ?addresses, "reason" => ?reason)
+                        crit!(?addresses, ?reason, "Listener abruptly closed")
                     }
                 };
                 if Swarm::listeners(&self.swarm).count() == 0 {
@@ -2023,7 +2317,7 @@ impl<P: Preset> Network<P> {
                 }
             }
             SwarmEvent::ListenerError { error, .. } => {
-                debug!(self.log, "Listener closed connection attempt"; "reason" => ?error);
+                debug_with_peers!(reason = ?error, "Listener closed connection attempt");
                 None
             }
             _ => {

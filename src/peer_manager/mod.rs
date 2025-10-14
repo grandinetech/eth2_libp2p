@@ -10,9 +10,9 @@ use delay_map::HashSetDelay;
 use discv5::Enr;
 use eip_7594::{compute_subnets_from_custody_group, get_custody_groups};
 use libp2p::identify::Info as IdentifyInfo;
+use logging::{debug_with_peers, error_with_peers, trace_with_peers, warn_with_peers};
 use peerdb::{BanOperation, BanResult, ScoreUpdateResult};
 use rand::seq::SliceRandom;
-use slog::{debug, error, trace, warn};
 use smallvec::SmallVec;
 use std::{
     sync::Arc,
@@ -115,8 +115,6 @@ pub struct PeerManager {
     /// Keeps track of whether the QUIC protocol is enabled or not.
     quic_enabled: bool,
     trusted_peers: HashSet<Enr>,
-    /// The logger associated with the `PeerManager`.
-    log: slog::Logger,
 }
 
 /// The events that the `PeerManager` outputs (requests).
@@ -151,7 +149,6 @@ impl PeerManager {
     pub fn new<P: Preset>(
         cfg: config::Config,
         network_globals: Arc<NetworkGlobals>,
-        log: &slog::Logger,
     ) -> Result<Self> {
         let config::Config {
             discovery_enabled,
@@ -200,7 +197,6 @@ impl PeerManager {
             metrics_enabled,
             quic_enabled,
             trusted_peers: Default::default(),
-            log: log.clone(),
         })
     }
 
@@ -214,7 +210,7 @@ impl PeerManager {
     pub fn goodbye_peer(&mut self, peer_id: &PeerId, reason: GoodbyeReason, source: ReportSource) {
         // Update the sync status if required
         if let Some(info) = self.network_globals.peers.write().peer_info_mut(peer_id) {
-            debug!(self.log, "Sending goodbye to peer"; "peer_id" => %peer_id, "reason" => %reason, "score" => %info.score());
+            debug_with_peers!(%peer_id, %reason, score = %info.score(), "Sending goodbye to peer");
             if matches!(reason, GoodbyeReason::IrrelevantNetwork) {
                 info.update_sync_status(SyncStatus::IrrelevantPeer);
             }
@@ -374,7 +370,7 @@ impl PeerManager {
                         .update_min_ttl(&peer_id, min_ttl);
                 }
                 if self.dial_peer(enr) {
-                    debug!(self.log, "Added discovered ENR peer to dial queue"; "peer_id" => %peer_id);
+                    debug_with_peers!(%peer_id, "Added discovered ENR peer to dial queue");
                     to_dial_peers += 1;
                 }
             }
@@ -387,7 +383,10 @@ impl PeerManager {
         // reach out target. To prevent the infinite loop, if a query returns no useful peers, we
         // will cancel the recursiveness and wait for the heartbeat to trigger another query latter.
         if results_count > 0 && to_dial_peers == 0 {
-            debug!(self.log, "Skipping recursive discovery query after finding no useful results"; "results" => results_count);
+            debug_with_peers!(
+                results = results_count,
+                "Skipping recursive discovery query after finding no useful results"
+            );
             metrics::inc_counter(&metrics::DISCOVERY_NO_USEFUL_ENRS);
         } else {
             // Queue another discovery if we need to
@@ -486,16 +485,21 @@ impl PeerManager {
             if previous_kind != peer_info.client().kind
                 || *peer_info.listening_addresses() != previous_listening_addresses
             {
-                debug!(self.log, "Identified Peer"; "peer" => %peer_id,
-                    "protocol_version" => &info.protocol_version,
-                    "agent_version" => &info.agent_version,
-                    "listening_addresses" => ?info.listen_addrs,
-                    "observed_address" => ?info.observed_addr,
-                    "protocols" => ?info.protocols
+                debug_with_peers!(
+                    %peer_id,
+                    protocol_version = &info.protocol_version,
+                    agent_version = &info.agent_version,
+                    listening_addresses = ?info.listen_addrs,
+                    observed_address = ?info.observed_addr,
+                    protocols = ?info.protocols,
+                    "Identified Peer"
                 );
             }
         } else {
-            error!(self.log, "Received an Identify response from an unknown peer"; "peer_id" => peer_id.to_string());
+            error_with_peers!(
+                peer_id = peer_id.to_string(),
+                "Received an Identify response from an unknown peer"
+            );
         }
     }
 
@@ -511,8 +515,7 @@ impl PeerManager {
     ) {
         let client = self.network_globals.client(peer_id);
         let score = self.network_globals.peers.read().score(peer_id);
-        debug!(self.log, "RPC Error"; "protocol" => %protocol, "err" => %err, "client" => %client,
-            "peer_id" => %peer_id, "score" => %score, "direction" => ?direction);
+        debug_with_peers!(%protocol, %err, %client, %peer_id, %score, ?direction, "RPC Error");
         crate::common::metrics::inc_counter_vec(
             &metrics::TOTAL_RPC_ERRORS_PER_CLIENT,
             &[
@@ -529,7 +532,7 @@ impl PeerManager {
                 PeerAction::MidToleranceError
             }
             RPCError::InternalError(e) => {
-                debug!(self.log, "Internal RPC Error"; "error" => %e, "peer_id" => %peer_id);
+                debug_with_peers!(error = %e, %peer_id, "Internal RPC Error");
                 return;
             }
             RPCError::HandlerRejected => PeerAction::Fatal,
@@ -624,7 +627,7 @@ impl PeerManager {
             RPCError::StreamTimeout => match direction {
                 ConnectionDirection::Incoming => {
                     // There was a timeout responding to a peer.
-                    debug!(self.log, "Timed out responding to RPC Request"; "peer_id" => %peer_id);
+                    debug_with_peers!(%peer_id, "Timed out responding to RPC Request");
                     return;
                 }
                 ConnectionDirection::Outgoing => match protocol {
@@ -663,7 +666,7 @@ impl PeerManager {
         if let Some(peer_info) = self.network_globals.peers.read().peer_info(peer_id) {
             // received a ping
             // reset the to-ping timer for this peer
-            trace!(self.log, "Received a ping request"; "peer_id" => %peer_id, "seq_no" => seq);
+            trace_with_peers!(%peer_id, seq_no = seq, "Received a ping request");
             match peer_info.connection_direction() {
                 Some(ConnectionDirection::Incoming) => {
                     self.inbound_ping_peers.insert(*peer_id);
@@ -672,26 +675,23 @@ impl PeerManager {
                     self.outbound_ping_peers.insert(*peer_id);
                 }
                 None => {
-                    warn!(self.log, "Received a ping from a peer with an unknown connection direction"; "peer_id" => %peer_id);
+                    warn_with_peers!(%peer_id, "Received a ping from a peer with an unknown connection direction");
                 }
             }
 
             // if the sequence number is unknown send an update the meta data of the peer.
             if let Some(meta_data) = &peer_info.meta_data() {
                 if meta_data.seq_number() < seq {
-                    trace!(self.log, "Requesting new metadata from peer";
-                        "peer_id" => %peer_id, "known_seq_no" => meta_data.seq_number(), "ping_seq_no" => seq);
+                    trace_with_peers!(%peer_id, known_seq_no = meta_data.seq_number(), ping_seq_no = seq, "Requesting new metadata from peer");
                     self.events.push(PeerManagerEvent::MetaData(*peer_id));
                 }
             } else {
                 // if we don't know the meta-data, request it
-                debug!(self.log, "Requesting first metadata from peer";
-                    "peer_id" => %peer_id);
+                debug_with_peers!(%peer_id, "Requesting first metadata from peer");
                 self.events.push(PeerManagerEvent::MetaData(*peer_id));
             }
         } else {
-            error!(self.log, "Received a PING from an unknown peer";
-                "peer_id" => %peer_id);
+            error_with_peers!(%peer_id, "Received a PING from an unknown peer");
         }
     }
 
@@ -703,18 +703,16 @@ impl PeerManager {
             // if the sequence number is unknown send update the meta data of the peer.
             if let Some(meta_data) = &peer_info.meta_data() {
                 if meta_data.seq_number() < seq {
-                    trace!(self.log, "Requesting new metadata from peer";
-                        "peer_id" => %peer_id, "known_seq_no" => meta_data.seq_number(), "pong_seq_no" => seq);
+                    trace_with_peers!(%peer_id, known_seq_no = meta_data.seq_number(), pong_seq_no = seq, "Requesting new metadata from peer");
                     self.events.push(PeerManagerEvent::MetaData(*peer_id));
                 }
             } else {
                 // if we don't know the meta-data, request it
-                trace!(self.log, "Requesting first metadata from peer";
-                    "peer_id" => %peer_id);
+                trace_with_peers!(%peer_id, "Requesting first metadata from peer");
                 self.events.push(PeerManagerEvent::MetaData(*peer_id));
             }
         } else {
-            error!(self.log, "Received a PONG from an unknown peer"; "peer_id" => %peer_id);
+            error_with_peers!(%peer_id, "Received a PONG from an unknown peer");
         }
     }
 
@@ -726,18 +724,15 @@ impl PeerManager {
         if let Some(peer_info) = self.network_globals.peers.write().peer_info_mut(peer_id) {
             if let Some(known_meta_data) = &peer_info.meta_data() {
                 if known_meta_data.seq_number() < meta_data.seq_number() {
-                    trace!(self.log, "Updating peer's metadata";
-                        "peer_id" => %peer_id, "known_seq_no" => known_meta_data.seq_number(), "new_seq_no" => meta_data.seq_number());
+                    trace_with_peers!(%peer_id, known_seq_no = known_meta_data.seq_number(), new_seq_no = meta_data.seq_number(), "Updating peer's metadata");
                 } else {
-                    trace!(self.log, "Received old metadata";
-                        "peer_id" => %peer_id, "known_seq_no" => known_meta_data.seq_number(), "new_seq_no" => meta_data.seq_number());
+                    trace_with_peers!(%peer_id, known_seq_no = known_meta_data.seq_number(), new_seq_no = meta_data.seq_number(), "Received old metadata");
                     // Updating metadata even in this case to prevent storing
                     // incorrect  `attnets/syncnets` for a peer
                 }
             } else {
                 // we have no meta-data for this peer, update
-                debug!(self.log, "Obtained peer's metadata";
-                    "peer_id" => %peer_id, "new_seq_no" => meta_data.seq_number());
+                debug_with_peers!(%peer_id, new_seq_no = meta_data.seq_number(), "Obtained peer's metadata");
             }
 
             let known_cgc = peer_info
@@ -760,11 +755,10 @@ impl PeerManager {
                                         .get(&custody_index)
                                         .cloned()
                                         .unwrap_or_else(|| {
-                                            warn!(
-                                                self.log,
-                                                "Custody group not found in subnet mapping";
-                                                "custody_index" => custody_index,
-                                                "peer_id" => %peer_id
+                                            warn_with_peers!(
+                                                "custody_index" = custody_index,
+                                                "peer_id" = %peer_id,
+                                                "Custody group not found in subnet mapping"
                                             );
                                             vec![]
                                         })
@@ -775,11 +769,12 @@ impl PeerManager {
                                 known_cgc.map_or(true, |known| custody_group_count != known);
                         }
                         Err(err) => {
-                            debug!(self.log, "Unable to compute peer custody groups from metadata";
-                                "info" => "Sending goodbye to peer",
-                                "peer_id" => %peer_id,
-                                "custody_group_count" => custody_group_count,
-                                "error" => ?err,
+                            debug_with_peers!(
+                                info = "Sending goodbye to peer",
+                                peer_id = %peer_id,
+                                custody_group_count = custody_group_count,
+                                error = ?err,
+                                "Unable to compute peer custody groups from metadata"
                             );
                             invalid_meta_data = true;
                         }
@@ -787,8 +782,7 @@ impl PeerManager {
                 }
             }
         } else {
-            error!(self.log, "Received METADATA from an unknown peer";
-                "peer_id" => %peer_id);
+            error_with_peers!(%peer_id, "Received METADATA from an unknown peer");
         }
 
         // Disconnect peers with invalid metadata and find other peers instead.
@@ -882,7 +876,7 @@ impl PeerManager {
             let mut peerdb = self.network_globals.peers.write();
             if peerdb.ban_status(peer_id).is_some() {
                 // don't connect if the peer is banned
-                error!(self.log, "Connection has been allowed to a banned peer"; "peer_id" => %peer_id);
+                error_with_peers!(%peer_id, "Connection has been allowed to a banned peer");
             }
 
             match connection {
@@ -949,10 +943,9 @@ impl PeerManager {
 
         // request the subnet query from discovery
         if !subnets_to_discover.is_empty() {
-            debug!(
-                self.log,
-                "Making subnet queries for maintaining sync committee peers";
-                "subnets" => ?subnets_to_discover.iter().map(|s| s.subnet).collect::<Vec<_>>()
+            debug_with_peers!(
+                subnets = ?subnets_to_discover.iter().map(|s| s.subnet).collect::<Vec<_>>(),
+                "Making subnet queries for maintaining sync committee peers"
             );
             self.events
                 .push(PeerManagerEvent::DiscoverSubnetPeers(subnets_to_discover));
@@ -988,7 +981,13 @@ impl PeerManager {
 
             if wanted_peers != 0 {
                 // We need more peers, re-queue a discovery lookup.
-                debug!(self.log, "Starting a new peer discovery query"; "connected" => peer_count, "target" => self.target_peers, "outbound" => outbound_only_peer_count, "wanted" => wanted_peers);
+                debug_with_peers!(
+                    connected = peer_count,
+                    target = self.target_peers,
+                    outbound = outbound_only_peer_count,
+                    wanted = wanted_peers,
+                    "Starting a new peer discovery query"
+                );
                 self.events
                     .push(PeerManagerEvent::DiscoverPeers(wanted_peers));
             }
@@ -1531,20 +1530,7 @@ mod tests {
     use super::*;
     use crate::rpc::MetaDataV3;
     use crate::NetworkConfig;
-    use slog::{o, Drain};
     use types::{config::Config as ChainConfig, nonstandard::Phase, preset::Mainnet};
-
-    pub fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
-        let decorator = slog_term::TermDecorator::new().build();
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-
-        if enabled {
-            slog::Logger::root(drain.filter_level(level).fuse(), o!())
-        } else {
-            slog::Logger::root(drain.filter(|_| false).fuse(), o!())
-        }
-    }
 
     async fn build_peer_manager(target_peer_count: usize) -> PeerManager {
         build_peer_manager_with_trusted_peers(vec![], target_peer_count).await
@@ -1572,14 +1558,12 @@ mod tests {
             target_peers: target_peer_count,
             ..Default::default()
         });
-        let log = build_log(slog::Level::Debug, false);
         let globals = NetworkGlobals::new_test_globals::<Mainnet>(
             chain_config,
             trusted_peers,
-            &log,
             network_config,
         );
-        PeerManager::new::<Mainnet>(config, Arc::new(globals), &log).unwrap()
+        PeerManager::new::<Mainnet>(config, Arc::new(globals)).unwrap()
     }
 
     #[tokio::test]

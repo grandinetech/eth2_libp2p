@@ -1,6 +1,6 @@
 use futures::channel::mpsc::Sender;
 use futures::prelude::*;
-use slog::{crit, trace};
+use logging::{crit, trace_with_peers};
 
 /// Provides a reason when client is shut down.
 #[derive(Copy, Clone, Debug)]
@@ -25,8 +25,6 @@ pub struct TaskExecutor {
     ///
     /// The task must provide a reason for shutting down.
     signal_tx: Sender<ShutdownReason>,
-
-    log: slog::Logger,
 }
 
 impl TaskExecutor {
@@ -34,8 +32,8 @@ impl TaskExecutor {
     ///
     /// Note: this function is mainly useful in tests. A `TaskExecutor` should be normally obtained from
     /// a [`RuntimeContext`](struct.RuntimeContext.html)
-    pub fn new(log: slog::Logger, signal_tx: Sender<ShutdownReason>) -> Self {
-        Self { signal_tx, log }
+    pub fn new(signal_tx: Sender<ShutdownReason>) -> Self {
+        Self { signal_tx }
     }
 
     /// Spawn a task to monitor the completion of another task.
@@ -47,7 +45,6 @@ impl TaskExecutor {
         name: &'static str,
     ) {
         let mut shutdown_sender = self.shutdown_sender();
-        let log = self.log.clone();
 
         tokio::spawn(async move {
             if let Err(join_error) = task_handle.await {
@@ -55,12 +52,10 @@ impl TaskExecutor {
                     let message = panic.downcast_ref::<&str>().unwrap_or(&"<none>");
 
                     crit!(
-                        log,
-                        "Task panic. This is a bug!";
-                        "task_name" => name,
-                        "message" => message,
-                        "advice" => "Please check above for a backtrace and notify \
-                                     the developers"
+                        task_name = name,
+                        message = message,
+                        advice = "Please check above for a backtrace and notify the developers",
+                        "Task panic. This is a bug!"
                     );
                     let _ =
                         shutdown_sender.try_send(ShutdownReason::Failure("Panic (fatal error)"));
@@ -83,9 +78,7 @@ impl TaskExecutor {
         task: impl Future<Output = R> + Send + 'static,
         name: &'static str,
     ) -> tokio::task::JoinHandle<R> {
-        let log = self.log.clone();
-
-        let future = task.inspect(move |_| trace!(log, "Async task completed"; "task" => name));
+        let future = task.inspect(move |_| trace_with_peers!(task = name, "Async task completed"));
 
         tokio::spawn(future)
     }

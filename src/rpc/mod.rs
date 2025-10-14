@@ -12,12 +12,13 @@ use libp2p::swarm::{
 };
 use libp2p::swarm::{ConnectionClosed, FromSwarm, SubstreamProtocol, THandlerInEvent};
 use libp2p::PeerId;
-use slog::{debug, o, trace};
+use logging::{debug_with_peers, trace_with_peers};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std_ext::ArcExt as _;
+use tracing::instrument;
 use types::{config::Config as ChainConfig, preset::Preset};
 
 use crate::types::ForkContext;
@@ -162,36 +163,34 @@ pub struct RPC<Id: ReqId, P: Preset> {
     events: Vec<BehaviourAction<Id, P>>,
     fork_context: Arc<ForkContext>,
     enable_light_client_server: bool,
-    /// Slog logger for RPC behaviour.
-    log: slog::Logger,
     /// A sequential counter indicating when data gets modified.
     seq_number: u64,
 }
 
 impl<Id: ReqId, P: Preset> RPC<Id, P> {
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p_rpc"),
+        name = "libp2p_rpc",
+        skip_all
+    )]
     pub fn new(
         chain_config: Arc<ChainConfig>,
         fork_context: Arc<ForkContext>,
         enable_light_client_server: bool,
         inbound_rate_limiter_config: Option<InboundRateLimiterConfig>,
         outbound_rate_limiter_config: Option<OutboundRateLimiterConfig>,
-        log: slog::Logger,
         seq_number: u64,
     ) -> Self {
-        let log = log.new(o!("service" => "libp2p_rpc"));
-
         let response_limiter = inbound_rate_limiter_config.map(|config| {
-            debug!(log, "Using response rate limiting params"; "config" => ?config);
-            ResponseLimiter::new(config, fork_context.clone(), log.clone())
+            debug_with_peers!(?config, "Using response rate limiting params");
+            ResponseLimiter::new(config, fork_context.clone())
                 .expect("Inbound limiter configuration parameters are valid")
         });
 
-        let outbound_request_limiter: SelfRateLimiter<Id, P> = SelfRateLimiter::new(
-            outbound_rate_limiter_config,
-            fork_context.clone(),
-            log.clone(),
-        )
-        .expect("Outbound limiter configuration parameters are valid");
+        let outbound_request_limiter: SelfRateLimiter<Id, P> =
+            SelfRateLimiter::new(outbound_rate_limiter_config, fork_context.clone())
+                .expect("Outbound limiter configuration parameters are valid");
 
         RPC {
             chain_config,
@@ -201,13 +200,18 @@ impl<Id: ReqId, P: Preset> RPC<Id, P> {
             events: Vec::new(),
             fork_context,
             enable_light_client_server,
-            log,
             seq_number,
         }
     }
 
     /// Sends an RPC response.
     /// Returns an `Err` if the request does exist in the active inbound requests list.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p_rpc"),
+        name = "libp2p_rpc",
+        skip_all
+    )]
     pub fn send_response(
         &mut self,
         request_id: InboundRequestId,
@@ -238,12 +242,11 @@ impl<Id: ReqId, P: Preset> RPC<Id, P> {
         }
 
         if peer_disconnected {
-            trace!(
-                self.log,
-                "Discarding response, peer is no longer connected";
-                "peer_id" => %peer_id,
-                "request_id" => ?request_id,
-                "response" => %response,
+            trace_with_peers!(
+                %peer_id,
+                ?request_id,
+                %response,
+                "Discarding response, peer is no longer connected"
             );
 
             return Ok(());
@@ -283,6 +286,12 @@ impl<Id: ReqId, P: Preset> RPC<Id, P> {
     /// Submits an RPC request.
     ///
     /// The peer must be connected for this to succeed.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p_rpc"),
+        name = "libp2p_rpc",
+        skip_all
+    )]
     pub fn send_request(&mut self, peer_id: PeerId, request_id: Id, req: RequestType<P>) {
         match self
             .outbound_request_limiter
@@ -301,6 +310,12 @@ impl<Id: ReqId, P: Preset> RPC<Id, P> {
 
     /// Application wishes to disconnect from this peer by sending a Goodbye message. This
     /// gracefully terminates the RPC behaviour with a goodbye message.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p_rpc"),
+        name = "libp2p_rpc",
+        skip_all
+    )]
     pub fn shutdown(&mut self, peer_id: PeerId, id: Id, reason: GoodbyeReason) {
         self.events.push(ToSwarm::NotifyHandler {
             peer_id,
@@ -309,16 +324,28 @@ impl<Id: ReqId, P: Preset> RPC<Id, P> {
         });
     }
 
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p_rpc"),
+        name = "libp2p_rpc",
+        skip_all
+    )]
     pub fn update_seq_number(&mut self, seq_number: u64) {
         self.seq_number = seq_number
     }
 
     /// Send a Ping request to the destination `PeerId` via `ConnectionId`.
+    #[instrument(parent = None,
+        level = "trace",
+        fields(service = "libp2p_rpc"),
+        name = "libp2p_rpc",
+        skip_all
+    )]
     pub fn ping(&mut self, peer_id: PeerId, id: Id) {
         let ping = Ping {
             data: self.seq_number,
         };
-        trace!(self.log, "Sending Ping"; "peer_id" => %peer_id);
+        trace_with_peers!(%peer_id, "Sending Ping");
         self.send_request(peer_id, id, RequestType::Ping(ping));
     }
 }
@@ -348,16 +375,10 @@ where
             },
             (),
         );
-        let log = self
-            .log
-            .new(slog::o!("peer_id" => peer_id.to_string(), "connection_id" => connection_id.to_string()));
-        let handler = RPCHandler::new(
-            protocol,
-            self.fork_context.clone(),
-            peer_id,
-            connection_id,
-            &log,
-        );
+        let _rpc_span =
+            tracing::info_span!("rpc_handler", peer_id = %peer_id, connection_id = %connection_id)
+                .entered();
+        let handler = RPCHandler::new(protocol, self.fork_context.clone(), peer_id, connection_id);
 
         Ok(handler)
     }
@@ -381,17 +402,10 @@ where
             (),
         );
 
-        let log = self
-            .log
-            .new(slog::o!("peer_id" => peer_id.to_string(), "connection_id" => connection_id.to_string()));
-
-        let handler = RPCHandler::new(
-            protocol,
-            self.fork_context.clone(),
-            peer_id,
-            connection_id,
-            &log,
-        );
+        let _rpc_span =
+            tracing::info_span!("rpc_handler", peer_id = %peer_id, connection_id = %connection_id)
+                .entered();
+        let handler = RPCHandler::new(protocol, self.fork_context.clone(), peer_id, connection_id);
 
         Ok(handler)
     }
@@ -492,12 +506,11 @@ where
                 // Restricts more than MAX_CONCURRENT_REQUESTS inbound requests from running simultaneously on the same protocol per peer.
                 if is_concurrent_request_limit_exceeded {
                     // There is already an active request with the same protocol. Send an error code to the peer.
-                    debug!(
-                        self.log,
-                        "There is an active request with the same protocol";
-                        "request" => %request_type,
-                        "protocol" => %request_type.protocol(),
-                        "peer_id" => %peer_id
+                    debug_with_peers!(
+                        request = %request_type,
+                        protocol = %request_type.protocol(),
+                        %peer_id,
+                        "There is an active request with the same protocol"
                     );
 
                     self.send_response_inner(
@@ -525,7 +538,7 @@ where
 
                 // If we received a Ping, we queue a Pong response.
                 if let RequestType::Ping(_) = request_type {
-                    trace!(self.log, "Received Ping, queueing Pong"; "connection_id" => %connection_id, "peer_id" => %peer_id);
+                    trace_with_peers!(connection_id = %connection_id, %peer_id, "Received Ping, queueing Pong");
 
                     self.send_response(
                         request_id,
@@ -612,55 +625,5 @@ where
         }
 
         Poll::Pending
-    }
-}
-
-impl<Id, P> slog::KV for RPCMessage<Id, P>
-where
-    P: Preset,
-    Id: ReqId,
-{
-    fn serialize(
-        &self,
-        _record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        serializer.emit_arguments("peer_id", &format_args!("{}", self.peer_id))?;
-        match &self.message {
-            Ok(received) => {
-                let (msg_kind, protocol) = match received {
-                    RPCReceived::Request(_, request_type) => {
-                        ("request", request_type.versioned_protocol().protocol())
-                    }
-                    RPCReceived::Response(_, res) => ("response", res.protocol()),
-                    RPCReceived::EndOfStream(_, end) => (
-                        "end_of_stream",
-                        match end {
-                            ResponseTermination::BlocksByRange => Protocol::BlocksByRange,
-                            ResponseTermination::BlocksByRoot => Protocol::BlocksByRoot,
-                            ResponseTermination::BlobsByRange => Protocol::BlobsByRange,
-                            ResponseTermination::BlobsByRoot => Protocol::BlobsByRoot,
-                            ResponseTermination::DataColumnsByRoot => Protocol::DataColumnsByRoot,
-                            ResponseTermination::DataColumnsByRange => Protocol::DataColumnsByRange,
-                            ResponseTermination::LightClientUpdatesByRange => {
-                                Protocol::LightClientUpdatesByRange
-                            }
-                        },
-                    ),
-                };
-                serializer.emit_str("msg_kind", msg_kind)?;
-                serializer.emit_arguments("protocol", &format_args!("{}", protocol))?;
-            }
-            Err(error) => {
-                let (msg_kind, protocol) = match &error {
-                    HandlerErr::Inbound { proto, .. } => ("inbound_err", *proto),
-                    HandlerErr::Outbound { proto, .. } => ("outbound_err", *proto),
-                };
-                serializer.emit_str("msg_kind", msg_kind)?;
-                serializer.emit_arguments("protocol", &format_args!("{}", protocol))?;
-            }
-        };
-
-        slog::Result::Ok(())
     }
 }
