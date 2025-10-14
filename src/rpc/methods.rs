@@ -1190,34 +1190,3 @@ impl<P: Preset> std::fmt::Display for DataColumnsByRangeRequest<P> {
         )
     }
 }
-
-impl slog::KV for StatusMessage {
-    fn serialize(
-        &self,
-        record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        use slog::Value;
-        serializer.emit_arguments("fork_digest", &format_args!("{:?}", self.fork_digest()))?;
-        Value::serialize(
-            &self.finalized_epoch(),
-            record,
-            "finalized_epoch",
-            serializer,
-        )?;
-        serializer.emit_arguments("finalized_root", &format_args!("{}", self.finalized_root()))?;
-        Value::serialize(&self.head_slot(), record, "head_slot", serializer)?;
-        serializer.emit_arguments("head_root", &format_args!("{}", self.head_root()))?;
-        Value::serialize(
-            &self.earliest_available_slot(),
-            record,
-            "earliest_available_slot",
-            serializer,
-        )?;
-        serializer.emit_arguments(
-            "earliest_available_slot",
-            &format_args!("{:?}", self.earliest_available_slot()),
-        )?;
-        slog::Result::Ok(())
-    }
-}

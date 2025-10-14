@@ -31,6 +31,7 @@ itertools = { workspace = true }
 libp2p = { workspace = true }
 libp2p-mplex = { workspace = true }
 local-ip-address = { workspace = true }
+logging = {workspace = true }
 lru = { workspace = true }
 once_cell = { workspace = true }
 num-traits = { workspace = true }
@@ -43,7 +44,6 @@ rand = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
-slog = { workspace = true }
 smallvec = { workspace = true }
 snap = { workspace = true }
 ssz = { workspace = true }
@@ -54,6 +54,8 @@ tiny-keccak = { workspace = true }
 tokio = { workspace = true }
 tokio-io-timeout = { workspace = true }
 tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
@@ -66,8 +68,6 @@ async-channel = { workspace = true }
 exit-future = { version = '0.2.0' }
 quickcheck = { workspace = true }
 quickcheck_macros = { workspace = true }
-slog-async = { workspace = true }
-slog-term = { workspace = true }
 tempfile = { workspace = true }
 
 [features]

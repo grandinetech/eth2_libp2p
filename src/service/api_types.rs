@@ -98,21 +98,3 @@ impl<P: Preset> std::convert::From<Response<P>> for RpcResponse<P> {
         }
     }
 }
-
-impl slog::Value for AppRequestId {
-    fn serialize(
-        &self,
-        record: &slog::Record,
-        key: slog::Key,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        match self {
-            AppRequestId::Application(ref id) => {
-                slog::Value::serialize(&format_args!("{:?}", id), record, key, serializer)
-            }
-            AppRequestId::Internal => {
-                slog::Value::serialize("internal request", record, key, serializer)
-            }
-        }
-    }
-}
