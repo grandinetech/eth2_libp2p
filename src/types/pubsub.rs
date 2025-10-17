@@ -26,7 +26,10 @@ use types::{
         SignedBeaconBlock as ElectraBeaconBlock,
     },
     fulu::containers::{DataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock},
-    gloas::containers::SignedBeaconBlock as GloasSignedBeaconBlock,
+    gloas::containers::{
+        PayloadAttestationMessage, SignedBeaconBlock as GloasSignedBeaconBlock,
+        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+    },
     nonstandard::Phase,
     phase0::{
         containers::{
@@ -70,6 +73,12 @@ pub enum PubsubMessage<P: Preset> {
     LightClientFinalityUpdate(Box<LightClientFinalityUpdate<P>>),
     /// Gossipsub message providing notification of a light client optimistic update.
     LightClientOptimisticUpdate(Box<LightClientOptimisticUpdate<P>>),
+    /// Gossipsub message providing notification of an execution payload envelope.
+    ExecutionPayload(Arc<SignedExecutionPayloadEnvelope<P>>),
+    /// Gossipsub message providing notification of a payload attestation message.
+    PayloadAttestationMessage(Arc<PayloadAttestationMessage>),
+    /// Gossipsub message providing notification of an execution payload bid.
+    ExecutionPayloadBid(Arc<SignedExecutionPayloadBid>),
 }
 
 // Implements the `DataTransform` trait of gossipsub to employ snappy compression
@@ -172,6 +181,9 @@ impl<P: Preset> PubsubMessage<P> {
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 GossipKind::LightClientOptimisticUpdate
             }
+            PubsubMessage::ExecutionPayload(_) => GossipKind::ExecutionPayload,
+            PubsubMessage::PayloadAttestationMessage(_) => GossipKind::PayloadAttestationMessage,
+            PubsubMessage::ExecutionPayloadBid(_) => GossipKind::ExecutionPayloadBid,
         }
     }
 
@@ -541,6 +553,78 @@ impl<P: Preset> PubsubMessage<P> {
                             light_client_optimistic_update,
                         )))
                     }
+                    GossipKind::ExecutionPayload => {
+                        match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
+                            Some(Phase::Gloas) => {
+                                let execution_payload_envelope = Arc::new(
+                                    SignedExecutionPayloadEnvelope::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                );
+                                Ok(PubsubMessage::ExecutionPayload(execution_payload_envelope))
+                            }
+                            Some(
+                                Phase::Phase0
+                                | Phase::Altair
+                                | Phase::Bellatrix
+                                | Phase::Capella
+                                | Phase::Deneb
+                                | Phase::Electra
+                                | Phase::Fulu,
+                            )
+                            | None => Err(format!(
+                                "execution_payload topic invalid for given fork digest {:?}",
+                                gossip_topic.fork_digest
+                            )),
+                        }
+                    }
+                    GossipKind::PayloadAttestationMessage => {
+                        match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
+                            Some(Phase::Gloas) => {
+                                let payload_attestation = Arc::new(
+                                    PayloadAttestationMessage::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                );
+                                Ok(PubsubMessage::PayloadAttestationMessage(payload_attestation))
+                            }
+                            Some(
+                                Phase::Phase0
+                                | Phase::Altair
+                                | Phase::Bellatrix
+                                | Phase::Capella
+                                | Phase::Deneb
+                                | Phase::Electra
+                                | Phase::Fulu,
+                            )
+                            | None => Err(format!(
+                                "payload_attestation_message topic invalid for given fork digest {:?}",
+                                gossip_topic.fork_digest
+                            )),
+                        }
+                    }
+                    GossipKind::ExecutionPayloadBid => {
+                        match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
+                            Some(Phase::Gloas) => {
+                                let execution_payload_bid = Arc::new(
+                                    SignedExecutionPayloadBid::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                );
+                                Ok(PubsubMessage::ExecutionPayloadBid(execution_payload_bid))
+                            }
+                            Some(
+                                Phase::Phase0
+                                | Phase::Altair
+                                | Phase::Bellatrix
+                                | Phase::Capella
+                                | Phase::Deneb
+                                | Phase::Electra
+                                | Phase::Fulu,
+                            )
+                            | None => Err(format!(
+                                "execution_payload_bid topic invalid for given fork digest {:?}",
+                                gossip_topic.fork_digest
+                            )),
+                        }
+                    }
                 }
             }
         }
@@ -568,6 +652,9 @@ impl<P: Preset> PubsubMessage<P> {
             PubsubMessage::BlsToExecutionChange(data) => data.to_ssz(),
             PubsubMessage::LightClientFinalityUpdate(data) => data.to_ssz(),
             PubsubMessage::LightClientOptimisticUpdate(data) => data.to_ssz(),
+            PubsubMessage::ExecutionPayload(data) => data.to_ssz(),
+            PubsubMessage::PayloadAttestationMessage(data) => data.to_ssz(),
+            PubsubMessage::ExecutionPayloadBid(data) => data.to_ssz(),
         }
     }
 }
@@ -636,6 +723,27 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
             }
             PubsubMessage::LightClientOptimisticUpdate(_data) => {
                 write!(f, "Light CLient Optimistic Update")
+            }
+            PubsubMessage::ExecutionPayload(data) => {
+                write!(
+                    f,
+                    "Execution Payload: slot: {}, beacon_block_root: {:?}",
+                    data.message.slot, data.message.beacon_block_root
+                )
+            }
+            PubsubMessage::PayloadAttestationMessage(data) => {
+                write!(
+                    f,
+                    "Payload Attestation: slot: {}, beacon_block_root: {:?}, validator_index: {}",
+                    data.data.slot, data.data.beacon_block_root, data.validator_index
+                )
+            }
+            PubsubMessage::ExecutionPayloadBid(data) => {
+                write!(
+                    f,
+                    "Execution Payload Bid: slot: {}, parent_block_root: {:?}, builder_index: {}",
+                    data.message.slot, data.message.parent_block_root, data.message.builder_index
+                )
             }
         }
     }
