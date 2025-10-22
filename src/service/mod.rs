@@ -361,14 +361,6 @@ impl<P: Preset> Network<P> {
                 max_subscriptions_per_request: max_topics_at_any_fork * 2,
             };
 
-            // If metrics are enabled for libp2p build the configuration
-            let gossipsub_metrics = ctx.libp2p_registry.as_mut().map(|registry| {
-                (
-                    registry.sub_registry_with_prefix("gossipsub"),
-                    Default::default(),
-                )
-            });
-
             let snappy_transform = SnappyTransform::new(
                 chain_config.max_payload_size,
                 chain_config.max_payload_size_compressed(),
@@ -377,11 +369,18 @@ impl<P: Preset> Network<P> {
             let mut gossipsub = Gossipsub::new_with_subscription_filter_and_transform(
                 MessageAuthenticity::Anonymous,
                 gs_config.clone(),
-                gossipsub_metrics,
                 filter,
                 snappy_transform,
             )
             .map_err(|e| anyhow!("Could not construct gossipsub: {:?}", e))?;
+
+            // If metrics are enabled for libp2p build the configuration
+            if let Some(ref mut registry) = ctx.libp2p_registry {
+                gossipsub = gossipsub.with_metrics(
+                    registry.sub_registry_with_prefix("gossipsub"),
+                    Default::default(),
+                );
+            }
 
             gossipsub
                 .with_peer_score(params, thresholds)
@@ -1002,17 +1001,8 @@ impl<P: Preset> Network<P> {
         // unsubscribe from the topic
         let libp2p_topic: Topic = topic.clone().into();
 
-        match self.gossipsub_mut().unsubscribe(&libp2p_topic) {
-            Err(_) => {
-                warn_with_peers!(topic = %libp2p_topic, "Failed to unsubscribe from topic");
-                false
-            }
-            Ok(v) => {
-                // Inform the network
-                debug_with_peers!(%topic, "Unsubscribed to topic");
-                v
-            }
-        }
+        debug_with_peers!(%topic, "Unsubscribed to topic");
+        self.gossipsub_mut().unsubscribe(&libp2p_topic)
     }
 
     /// Publishes message on the pubsub (gossipsub) behaviour, choosing the encoding.
@@ -1066,7 +1056,7 @@ impl<P: Preset> Network<P> {
                     }
                 }
 
-                if let PublishError::InsufficientPeers = e {
+                if let PublishError::NoPeersSubscribedToTopic = e {
                     self.gossip_cache.insert(topic, message_data);
                 }
             }
@@ -1106,18 +1096,11 @@ impl<P: Preset> Network<P> {
             }
         }
 
-        if let Err(e) = self.gossipsub_mut().report_message_validation_result(
+        self.gossipsub_mut().report_message_validation_result(
             &message_id,
             propagation_source,
             validation_result,
-        ) {
-            warn_with_peers!(
-                message_id = %message_id,
-                peer_id = %propagation_source,
-                error = ?e,
-                "Failed to report message validation"
-            );
-        }
+        );
     }
 
     /// Updates the current gossipsub scoring parameters based on the validator count and current
@@ -1603,18 +1586,11 @@ impl<P: Preset> Network<P> {
                     Err(e) => {
                         debug_with_peers!(topic = ?gs_msg.topic, error = e, "Could not decode gossipsub message");
                         //reject the message
-                        if let Err(e) = self.gossipsub_mut().report_message_validation_result(
+                        self.gossipsub_mut().report_message_validation_result(
                             &id,
                             &propagation_source,
                             MessageAcceptance::Reject,
-                        ) {
-                            warn_with_peers!(
-                                message_id = %id,
-                                peer_id = %propagation_source,
-                                error = ?e,
-                                "Failed to report message validation"
-                            );
-                        }
+                        );
                     }
                     Ok(msg) => {
                         // Notify the network
@@ -1707,13 +1683,13 @@ impl<P: Preset> Network<P> {
             } => {
                 debug_with_peers!(
                     peer_id = %peer_id,
-                    publish = failed_messages.publish,
-                    forward = failed_messages.forward,
                     priority = failed_messages.priority,
                     non_priority = failed_messages.non_priority,
                     "Slow gossipsub peer"
-                ); // Punish the peer if it cannot handle priority messages
-                if failed_messages.total_timeout() > 10 {
+                );
+
+                // Punish the peer if it cannot handle priority messages
+                if failed_messages.priority > 10 {
                     debug_with_peers!(%peer_id, "Slow gossipsub peer penalized for priority failure");
                     self.peer_manager_mut().report_peer(
                         &peer_id,
@@ -1722,7 +1698,7 @@ impl<P: Preset> Network<P> {
                         None,
                         "publish_timeout_penalty",
                     );
-                } else if failed_messages.total_queue_full() > 10 {
+                } else if failed_messages.non_priority > 10 {
                     debug_with_peers!(%peer_id, "Slow gossipsub peer penalized for send queue full");
                     self.peer_manager_mut().report_peer(
                         &peer_id,
@@ -2259,6 +2235,7 @@ impl<P: Preset> Network<P> {
                 send_back_addr,
                 error,
                 connection_id: _,
+                peer_id: _,
             } => {
                 let error_repr = match error {
                     libp2p::swarm::ListenError::Aborted => {
@@ -2267,8 +2244,8 @@ impl<P: Preset> Network<P> {
                     libp2p::swarm::ListenError::WrongPeerId { obtained, endpoint } => {
                         format!("Wrong peer id, obtained {obtained}, endpoint {endpoint:?}")
                     }
-                    libp2p::swarm::ListenError::LocalPeerId { endpoint } => {
-                        format!("Dialing local peer id {endpoint:?}")
+                    libp2p::swarm::ListenError::LocalPeerId { address } => {
+                        format!("Dialing local peer id {address:?}")
                     }
                     libp2p::swarm::ListenError::Denied { cause } => {
                         format!("Connection was denied with cause: {cause:?}")
