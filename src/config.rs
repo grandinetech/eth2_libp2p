@@ -2,6 +2,7 @@ use crate::defaults::{
     DEFAULT_BEACON_NODE_DIR, DEFAULT_HARDCODED_NETWORK, DEFAULT_NETWORK_DIR, DEFAULT_ROOT_DIR,
 };
 use crate::listen_addr::{ListenAddr, ListenAddress};
+use crate::peer_manager::config::DEFAULT_TARGET_PEERS;
 use crate::rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig};
 use crate::types::{ForkContext, GossipKind};
 use crate::{Enr, PeerIdSerialized};
@@ -344,7 +345,7 @@ impl Default for Config {
             enr_udp6_port: None,
             enr_quic6_port: None,
             enr_tcp6_port: None,
-            target_peers: 100,
+            target_peers: DEFAULT_TARGET_PEERS,
             target_subnet_peers: 3,
             discv5_config,
             boot_nodes_enr: vec![],
