@@ -36,7 +36,8 @@ pub use libp2p::{
     },
 };
 use logging::{
-    crit, debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,
+    debug_with_peers, error_with_peers, exception, info_with_peers, trace_with_peers,
+    warn_with_peers,
 };
 use lru::LruCache;
 use ssz::SszWrite;
@@ -815,7 +816,7 @@ impl<P: Preset> Discovery<P> {
         let enr_fork_id = match self.local_enr().eth2() {
             Ok(v) => v,
             Err(e) => {
-                crit!(error = e, "Local ENR has no fork id");
+                exception!(error = e, "Local ENR has no fork id");
                 return;
             }
         };
@@ -1055,7 +1056,7 @@ impl<P: Preset> NetworkBehaviour for Discovery<P> {
                             self.event_stream = EventStream::Present(stream);
                         }
                         Err(e) => {
-                            crit!(error = %e, "Discv5 event stream failed");
+                            exception!(error = %e, "Discv5 event stream failed");
                             self.event_stream = EventStream::InActive;
                         }
                     }

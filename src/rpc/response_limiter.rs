@@ -7,7 +7,7 @@ use crate::types::ForkContext;
 use crate::PeerId;
 use futures::FutureExt;
 use libp2p::swarm::ConnectionId;
-use logging::{crit, debug_with_peers};
+use logging::{debug_with_peers, exception};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -108,8 +108,8 @@ impl<P: Preset> ResponseLimiter<P> {
             Err(e) => match e {
                 RateLimitedErr::TooLarge => {
                     // This should never happen with default parameters. Let's just send the response.
-                    // Log a crit since this is a config issue.
-                    crit!(
+                    // Log a exception since this is a config issue.
+                    exception!(
                         %protocol,
                         "Response rate limiting error for a batch that will never fit. Sending response anyway. Check configuration parameters."
                     );

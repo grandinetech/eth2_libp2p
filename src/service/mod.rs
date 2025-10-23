@@ -35,7 +35,8 @@ use libp2p::swarm::{NetworkBehaviour, Swarm, SwarmEvent};
 use libp2p::upnp::tokio::Behaviour as Upnp;
 use libp2p::{identify, PeerId, SwarmBuilder};
 use logging::{
-    crit, debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,
+    debug_with_peers, error_with_peers, exception, info_with_peers, trace_with_peers,
+    warn_with_peers,
 };
 use std::num::{NonZeroU8, NonZeroUsize};
 use std::path::PathBuf;
@@ -596,7 +597,7 @@ impl<P: Preset> Network<P> {
                     info_with_peers!(address = %log_address, "Listening established");
                 }
                 Err(err) => {
-                    crit!(
+                    exception!(
                         error = ?err,
                         %listen_multiaddr,
                         "Unable to listen on libp2p address"
@@ -1311,7 +1312,7 @@ impl<P: Preset> Network<P> {
     )]
     pub fn update_enr_subnet(&mut self, subnet_id: Subnet, value: bool) {
         if let Err(e) = self.discovery_mut().update_enr_bitfield(subnet_id, value) {
-            crit!(error = ?e, "Could not update ENR bitfield");
+            exception!(error = ?e, "Could not update ENR bitfield");
         }
         // update the local meta data which informs our peers of the update during PINGS
         self.update_metadata_bitfields();
@@ -1320,7 +1321,7 @@ impl<P: Preset> Network<P> {
     /// Updates the cgc value in the ENR.
     pub fn update_enr_cgc(&mut self, new_custody_group_count: u64) {
         if let Err(e) = self.discovery_mut().update_enr_cgc(new_custody_group_count) {
-            crit!(error = ?e, "Could not update cgc in ENR");
+            exception!(error = ?e, "Could not update cgc in ENR");
         }
         // update the local meta data which informs our peers of the update during PINGS
         self.update_metadata_cgc(new_custody_group_count);
@@ -1404,7 +1405,7 @@ impl<P: Preset> Network<P> {
     /// Updates the local ENR's "nfd" field to `next_fork_digest`.
     pub fn update_nfd(&mut self, next_fork_digest: ForkDigest) {
         if let Err(e) = self.discovery_mut().update_enr_nfd(next_fork_digest) {
-            crit!(error = ?e, "Could not update ENR next fork digest");
+            exception!(error = ?e, "Could not update ENR next fork digest");
         }
     }
 
@@ -2307,7 +2308,7 @@ impl<P: Preset> Network<P> {
                         debug_with_peers!(?addresses, "Listener gracefully closed")
                     }
                     Err(reason) => {
-                        crit!(?addresses, ?reason, "Listener abruptly closed")
+                        exception!(?addresses, ?reason, "Listener abruptly closed")
                     }
                 };
                 if Swarm::listeners(&self.swarm).count() == 0 {

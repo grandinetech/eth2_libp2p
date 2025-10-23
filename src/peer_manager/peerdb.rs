@@ -6,7 +6,7 @@ use crate::{
 use eip_7594::compute_subnets_for_node;
 use helper_functions::misc;
 use itertools::Itertools as _;
-use logging::{crit, debug_with_peers, error_with_peers, trace_with_peers, warn_with_peers};
+use logging::{debug_with_peers, error_with_peers, exception, trace_with_peers, warn_with_peers};
 use peer_info::{ConnectionDirection, PeerConnectionStatus, PeerInfo};
 use score::{PeerAction, ReportSource, Score, ScoreState};
 use ssz::H256;
@@ -1166,7 +1166,7 @@ impl PeerDB {
                 Some((*id, unbanned_ips))
             } else {
                 // If there is no minimum, this is a coding error.
-                crit!("banned_peers > MAX_BANNED_PEERS despite no banned peers in db!");
+                exception!("banned_peers > MAX_BANNED_PEERS despite no banned peers in db!");
                 // reset banned_peers this will also exit the loop
                 self.banned_peers_count = BannedPeersCount::default();
                 None

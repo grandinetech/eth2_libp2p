@@ -14,7 +14,7 @@ use std::{
 
 use futures::FutureExt;
 use libp2p::{swarm::NotifyHandler, PeerId};
-use logging::{crit, debug_with_peers};
+use logging::{debug_with_peers, exception};
 use smallvec::SmallVec;
 use tokio_util::time::DelayQueue;
 use types::preset::Preset;
@@ -164,8 +164,8 @@ impl<Id: ReqId, P: Preset> SelfRateLimiter<Id, P> {
                     match e {
                         RateLimitedErr::TooLarge => {
                             // this should never happen with default parameters. Let's just send the request.
-                            // Log a crit since this is a config issue.
-                            crit!(
+                            // Log a exception since this is a config issue.
+                            exception!(
                                 protocol = %req.versioned_protocol().protocol(),
                                 "Self rate limiting error for a batch that will never fit. Sending request anyway. Check configuration parameters.",
                             );

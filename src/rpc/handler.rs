@@ -18,7 +18,7 @@ use libp2p::swarm::handler::{
 };
 use libp2p::swarm::{ConnectionId, Stream};
 use libp2p::PeerId;
-use logging::{crit, debug_with_peers, trace_with_peers};
+use logging::{debug_with_peers, exception, trace_with_peers};
 use smallvec::SmallVec;
 use std::{
     collections::{hash_map::Entry, VecDeque},
@@ -449,7 +449,7 @@ where
                     outbound_err,
                 )));
             } else {
-                crit!(peer_id = %self.peer_id,
+                exception!(peer_id = %self.peer_id,
                     connection_id = %self.connection_id,
                     stream_id = ?outbound_id.get_ref(), "timed out substream not in the books");
             }
@@ -816,7 +816,7 @@ where
                     }
                 }
                 OutboundSubstreamState::Poisoned => {
-                    crit!(
+                    exception!(
                         peer_id = %self.peer_id,
                         connection_id = %self.connection_id,
                         "Poisoned outbound substream"
@@ -1052,7 +1052,7 @@ where
                 )
                 .is_some()
             {
-                crit!(
+                exception!(
                     peer_id = %self.peer_id,
                     connection_id = %self.connection_id,
                     id = ?self.current_outbound_substream_id, "Duplicate outbound substream id");
