@@ -1911,6 +1911,28 @@ impl<P: Preset> Network<P> {
                             request_type,
                         })
                     }
+                    RequestType::ExecutionPayloadEnvelopesByRange(_) => {
+                        metrics::inc_counter_vec(
+                            &metrics::TOTAL_RPC_REQUESTS,
+                            &["execution_payload_envelopes_by_range"],
+                        );
+                        Some(NetworkEvent::RequestReceived {
+                            peer_id,
+                            inbound_request_id,
+                            request_type,
+                        })
+                    }
+                    RequestType::ExecutionPayloadEnvelopesByRoot(_) => {
+                        metrics::inc_counter_vec(
+                            &metrics::TOTAL_RPC_REQUESTS,
+                            &["execution_payload_envelopes_by_root"],
+                        );
+                        Some(NetworkEvent::RequestReceived {
+                            peer_id,
+                            inbound_request_id,
+                            request_type,
+                        })
+                    }
                     RequestType::LightClientBootstrap(_) => {
                         metrics::inc_counter_vec(
                             &metrics::TOTAL_RPC_REQUESTS,
@@ -1996,6 +2018,18 @@ impl<P: Preset> Network<P> {
                     RpcSuccessResponse::DataColumnsByRange(resp) => {
                         self.build_response(id, peer_id, Response::DataColumnsByRange(Some(resp)))
                     }
+                    RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(resp) => self
+                        .build_response(
+                            id,
+                            peer_id,
+                            Response::ExecutionPayloadEnvelopesByRange(Some(resp)),
+                        ),
+                    RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(resp) => self
+                        .build_response(
+                            id,
+                            peer_id,
+                            Response::ExecutionPayloadEnvelopesByRoot(Some(resp)),
+                        ),
                     // Should never be reached
                     RpcSuccessResponse::LightClientBootstrap(bootstrap) => {
                         self.build_response(id, peer_id, Response::LightClientBootstrap(bootstrap))
@@ -2025,6 +2059,12 @@ impl<P: Preset> Network<P> {
                     ResponseTermination::BlobsByRoot => Response::BlobsByRoot(None),
                     ResponseTermination::DataColumnsByRoot => Response::DataColumnsByRoot(None),
                     ResponseTermination::DataColumnsByRange => Response::DataColumnsByRange(None),
+                    ResponseTermination::ExecutionPayloadEnvelopesByRange => {
+                        Response::ExecutionPayloadEnvelopesByRange(None)
+                    }
+                    ResponseTermination::ExecutionPayloadEnvelopesByRoot => {
+                        Response::ExecutionPayloadEnvelopesByRoot(None)
+                    }
                     ResponseTermination::LightClientUpdatesByRange => {
                         Response::LightClientUpdatesByRange(None)
                     }
