@@ -1,6 +1,6 @@
 use futures::channel::mpsc::Sender;
 use futures::prelude::*;
-use logging::{crit, trace_with_peers};
+use logging::{exception, trace_with_peers};
 
 /// Provides a reason when client is shut down.
 #[derive(Copy, Clone, Debug)]
@@ -51,7 +51,7 @@ impl TaskExecutor {
                 if let Ok(panic) = join_error.try_into_panic() {
                     let message = panic.downcast_ref::<&str>().unwrap_or(&"<none>");
 
-                    crit!(
+                    exception!(
                         task_name = name,
                         message = message,
                         advice = "Please check above for a backtrace and notify the developers",
