@@ -1231,7 +1231,7 @@ impl<P: Preset> Discovery<P> {
 mod tests {
     use super::*;
     use crate::{
-        rpc::methods::{MetaData, MetaDataV2},
+        rpc::methods::{MetaData, MetaDataV3},
         types::EnrAttestationBitfield,
     };
     use libp2p::identity::secp256k1;
@@ -1257,10 +1257,11 @@ mod tests {
         let globals = NetworkGlobals::new::<Mainnet>(
             chain_config.clone_arc(),
             enr,
-            MetaData::V2(MetaDataV2 {
+            MetaData::V3(MetaDataV3 {
                 seq_number: 0,
                 attnets: Default::default(),
                 syncnets: Default::default(),
+                custody_group_count: chain_config.custody_requirement,
             }),
             vec![],
             false,

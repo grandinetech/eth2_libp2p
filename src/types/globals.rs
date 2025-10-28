@@ -36,7 +36,7 @@ pub struct NetworkGlobals {
     /// The current state of the backfill sync.
     pub backfill_state: RwLock<BackFillState>,
     /// The computed sampling subnets and columns is stored to avoid re-computing.
-    sampling_subnets: RwLock<HashSet<SubnetId>>,
+    pub sampling_subnets: RwLock<HashSet<SubnetId>>,
     /// Target subnet peers.
     pub target_subnet_peers: usize,
     /// Network-related configuration. Immutable after initialization.
