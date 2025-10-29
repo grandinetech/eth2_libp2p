@@ -228,14 +228,6 @@ impl PeerDB {
             .map(|(peer_id, _)| peer_id)
     }
 
-    pub fn is_peer_connected(&self, peer_id: &PeerId) -> bool {
-        self.peers
-            .iter()
-            .filter(|(_, info)| info.is_connected())
-            .find(|(connected_peer_id, _)| **connected_peer_id == *peer_id)
-            .is_some()
-    }
-
     /// Connected or dialing peers
     pub fn connected_or_dialing_peers(&self) -> impl Iterator<Item = &PeerId> {
         self.peers
@@ -277,10 +269,12 @@ impl PeerDB {
                 info.is_connected()
                     && match info.sync_status() {
                         SyncStatus::Synced { info } => info.has_slot(
-                            misc::compute_start_slot_at_epoch::<P>(epoch + 1).saturating_sub(1),
+                            misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1))
+                                .saturating_sub(1),
                         ),
                         SyncStatus::Advanced { info } => info.has_slot(
-                            misc::compute_start_slot_at_epoch::<P>(epoch + 1).saturating_sub(1),
+                            misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1))
+                                .saturating_sub(1),
                         ),
                         SyncStatus::IrrelevantPeer
                         | SyncStatus::Behind { .. }
@@ -1264,7 +1258,8 @@ impl PeerDB {
                     score = %info.score(),
                     past_score_state = %previous_state,
                     "Peer transitioned to forced disconnect score state"
-                ); // disconnect the peer if it's currently connected or dialing
+                );
+                // disconnect the peer if it's currently connected or dialing
                 if info.is_connected_or_dialing() {
                     ScoreTransitionResult::Disconnected
                 } else if previous_state == ScoreState::Banned {
@@ -1290,7 +1285,8 @@ impl PeerDB {
                     score = %info.score(),
                     past_score_state = %previous_state,
                     "Peer transitioned to healthy score state"
-                ); // unban the peer if it was previously banned.
+                );
+                // unban the peer if it was previously banned.
                 ScoreTransitionResult::Unbanned
             }
             // Explicitly ignore states that haven't transitioned.

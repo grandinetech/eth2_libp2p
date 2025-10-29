@@ -1,10 +1,8 @@
 //! Implementation of peer management system.
 
 use crate::common::time_cache::LRUTimeCache;
-use crate::discovery::enr_ext::EnrExt;
-use crate::discovery::peer_id_to_node_id;
+use crate::discovery::{enr_ext::EnrExt, peer_id_to_node_id};
 use crate::rpc::{GoodbyeReason, MetaData, Protocol, RPCError, RpcErrorResponse};
-use crate::types::GossipKind;
 use crate::{metrics, Gossipsub, NetworkGlobals, PeerId, Subnet, SubnetDiscovery};
 use anyhow::Result;
 use delay_map::HashSetDelay;
@@ -27,6 +25,7 @@ pub use libp2p::identity::Keypair;
 pub mod peerdb;
 
 use crate::peer_manager::peerdb::client::ClientKind;
+use crate::types::GossipKind;
 use libp2p::multiaddr;
 pub use peerdb::peer_info::{ConnectionDirection, PeerConnectionStatus, PeerInfo};
 use peerdb::score::{PeerAction, ReportSource};
@@ -1705,7 +1704,10 @@ mod tests {
     use super::*;
     use crate::rpc::MetaDataV3;
     use crate::NetworkConfig;
-    use types::{config::Config as ChainConfig, nonstandard::Phase, phase0::primitives::ForkDigest, preset::Mainnet};
+    use types::{
+        config::Config as ChainConfig, nonstandard::Phase, phase0::primitives::ForkDigest,
+        preset::Mainnet,
+    };
 
     async fn build_peer_manager(target_peer_count: usize) -> PeerManager {
         build_peer_manager_with_trusted_peers(vec![], target_peer_count).await

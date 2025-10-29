@@ -258,6 +258,11 @@ pub fn load_or_build_metadata(
                             || meta_data
                                 .syncnets()
                                 .is_some_and(|syncnets| persisted_metadata.syncnets != syncnets)
+                            || meta_data
+                                .custody_group_count()
+                                .is_some_and(|custody_group_count| {
+                                    persisted_metadata.custody_group_count != custody_group_count
+                                })
                         {
                             *meta_data.seq_number_mut() += 1;
                         }

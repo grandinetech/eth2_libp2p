@@ -739,7 +739,7 @@ where
                         // stream closed
                         // if we expected multiple streams send a stream termination,
                         // else report the stream terminating only.
-                        //trace_with_peers!("RPC Response - stream closed by remote");
+                        //"RPC Response - stream closed by remote);
                         // drop the stream
                         let delay_key = &entry.get().delay_key;
                         let request_id = entry.get().req_id;

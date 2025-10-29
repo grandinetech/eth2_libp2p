@@ -1029,5 +1029,18 @@ mod tests {
         );
         assert_eq!(BLOB_SIDECAR_MIN, BlobSidecar::<Mainnet>::SIZE.get());
         assert_eq!(BLOB_SIDECAR_MAX, BlobSidecar::<Mainnet>::SIZE.get());
+
+        assert_eq!(
+            *DATA_COLUMN_MIN,
+            DataColumnSidecar::<Mainnet>::default()
+                .to_ssz()
+                .unwrap()
+                .len(),
+        );
+
+        assert_eq!(
+            *DATA_COLUMN_MAX,
+            DataColumnSidecar::<Mainnet>::full().to_ssz().unwrap().len(),
+        );
     }
 }

@@ -123,7 +123,6 @@ pub use libp2p;
 pub use libp2p::{core::ConnectedPoint, PeerId, Swarm};
 pub use libp2p::{multiaddr, Multiaddr};
 pub use misc::GossipId;
-// pub use metrics::scrape_discovery_metrics;
 pub use peer_manager::{
     peerdb::client::Client,
     peerdb::score::{PeerAction, ReportSource},

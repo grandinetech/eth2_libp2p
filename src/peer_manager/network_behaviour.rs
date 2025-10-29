@@ -71,7 +71,7 @@ impl NetworkBehaviour for PeerManager {
                 Poll::Ready(Some(Err(e))) => {
                     error_with_peers!(
                         error = e.to_string(),
-                        "Failed to check for inbound peers to ping"
+                        "Failed to check for outbound peers to ping"
                     )
                 }
                 Poll::Ready(None) | Poll::Pending => break,

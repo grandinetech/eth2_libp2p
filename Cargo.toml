@@ -10,19 +10,16 @@ edition = { workspace = true }
 [dependencies]
 alloy-rlp = { workspace = true }
 anyhow = { workspace = true }
-async-channel = { workspace = true }
-asynchronous-codec = { workspace = true }
 bls = { workspace = true }
 bytes = { workspace = true }
 delay_map = { workspace = true }
 dirs = { workspace = true }
 discv5 = { workspace = true }
-either = { workspace = true }
 eip_7594 = { workspace = true }
+either = { workspace = true }
 enum-iterator = { workspace = true }
 fnv = { workspace = true }
 futures = { workspace = true }
-futures-timer = { workspace = true }
 gossipsub = { workspace = true }
 grandine_version = { workspace = true }
 helper_functions = { workspace = true }
@@ -31,15 +28,11 @@ itertools = { workspace = true }
 libp2p = { workspace = true }
 libp2p-mplex = { workspace = true }
 local-ip-address = { workspace = true }
-logging = {workspace = true }
+logging = { workspace = true }
 lru = { workspace = true }
-once_cell = { workspace = true }
-num-traits = { workspace = true }
 parking_lot = { workspace = true }
 prometheus = { workspace = true }
 prometheus-client = { workspace = true }
-quick-protobuf = { workspace = true }
-quick-protobuf-codec = { workspace = true }
 rand = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
@@ -49,7 +42,6 @@ snap = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 strum = { workspace = true }
-thiserror = { workspace = true }
 tiny-keccak = { workspace = true }
 tokio = { workspace = true }
 tokio-io-timeout = { workspace = true }
@@ -60,17 +52,11 @@ try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 unsigned-varint = { workspace = true }
-void = { workspace = true }
 
 [dev-dependencies]
-async-std = { version = '1.6.3', features = ["unstable"] }
-async-channel = { workspace = true }
-exit-future = { version = '0.2.0' }
 quickcheck = { workspace = true }
 quickcheck_macros = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
-default = ["serde"]
 libp2p-websocket = []
-serde = []

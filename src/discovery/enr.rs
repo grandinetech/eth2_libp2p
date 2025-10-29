@@ -444,17 +444,20 @@ mod test {
 
     #[test]
     fn custody_group_value() {
+        let config = NetworkConfig {
+            subscribe_all_data_column_subnets: true,
+            ..NetworkConfig::default()
+        };
         let chain_config = make_fulu_config();
-        let enr = build_enr_with_config(&chain_config, NetworkConfig::default(), Some(42)).0;
+        let enr = build_enr_with_config(&chain_config, config, Some(42)).0;
 
         assert_eq!(enr.custody_group_count(&chain_config).unwrap(), 42);
     }
 
     #[test]
     fn test_encode_decode_eth2_enr() {
-        let config = NetworkConfig::default();
         let chain_config = make_fulu_config();
-        let (enr, _key) = build_enr_with_config(&chain_config, config, None);
+        let (enr, _key) = build_enr_with_config(&chain_config, NetworkConfig::default(), None);
         // Check all Eth2 Mappings are decodeable
         enr.eth2().unwrap();
         enr.attestation_bitfield().unwrap();

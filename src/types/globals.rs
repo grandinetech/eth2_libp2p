@@ -6,7 +6,7 @@ use crate::types::{BackFillState, SyncState};
 use crate::{Client, Enr, EnrExt, GossipTopic, Multiaddr, NetworkConfig, PeerId};
 use eip_7594::{compute_subnets_from_custody_group, get_custody_groups};
 use helper_functions::misc::compute_subnet_for_data_column_sidecar;
-use logging::error_with_peers;
+use logging::{debug_with_peers, error_with_peers};
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -81,6 +81,12 @@ impl NetworkGlobals {
             sampling_subnets.extend(subnets);
         }
 
+        debug_with_peers!(
+            cgc = custody_group_count,
+            ?sampling_subnets,
+            "Starting node with custody params"
+        );
+
         NetworkGlobals {
             config: config.clone_arc(),
             local_enr: RwLock::new(enr.clone()),
@@ -139,7 +145,7 @@ impl NetworkGlobals {
 
     /// Check if peer is connected
     pub fn is_peer_connected(&self, peer_id: &PeerId) -> bool {
-        self.peers.read().is_peer_connected(peer_id)
+        self.peers.read().is_connected(peer_id)
     }
 
     /// Returns the number of libp2p connected peers with outbound-only connections.
@@ -224,7 +230,7 @@ impl NetworkGlobals {
             .unwrap_or(false)
     }
 
-    // Returns the TopicConfig to compute the set of Gossip topics for a given fork
+    /// Returns the TopicConfig to compute the set of Gossip topics for a given fork
     pub fn as_topic_config(&self) -> TopicConfig {
         TopicConfig {
             enable_light_client_server: self.network_config.enable_light_client_server,

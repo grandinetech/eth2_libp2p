@@ -305,6 +305,8 @@ impl<P: Preset> Network<P> {
                 )
             };
 
+            trace_with_peers!(?params, "Using peer score params");
+
             // Set up a scoring update interval
             let update_gossipsub_scores = tokio::time::interval(params.decay_interval);
 
@@ -1014,7 +1016,17 @@ impl<P: Preset> Network<P> {
     )]
     pub fn publish(&mut self, message: PubsubMessage<P>) {
         for topic in message.topics(GossipEncoding::default(), self.enr_fork_id.fork_digest) {
-            let message_data = message.encode(GossipEncoding::default()).expect("TODO");
+            let message_data = match message.encode(GossipEncoding::default()) {
+                Ok(message) => message,
+                Err(encoding_error) => {
+                    warn_with_peers!(
+                        error = ?encoding_error,
+                        "Could not publish message due to write error"
+                    );
+
+                    return;
+                }
+            };
 
             if let Err(e) = self
                 .gossipsub_mut()
@@ -1733,7 +1745,6 @@ impl<P: Preset> Network<P> {
             return None;
         }
 
-        // The METADATA and PING RPC responses are handled within the behaviour and not propagated
         // The PING RPC responses are handled within the behaviour and not propagated
         match event.message {
             Err(handler_err) => {

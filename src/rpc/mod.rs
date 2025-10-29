@@ -67,7 +67,7 @@ pub enum RPCSend<Id, P: Preset> {
     /// The `Id` is given by the application making the request. These
     /// go over *outbound* connections.
     Request(Id, RequestType<P>),
-    /// A response sent from the application..
+    /// A response sent from the application.
     ///
     /// The `SubstreamId` must correspond to the RPC-given ID of the original request received from the
     /// peer. The second parameter is a single chunk of a response. These go over *inbound*

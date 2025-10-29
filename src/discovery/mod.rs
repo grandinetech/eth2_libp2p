@@ -51,9 +51,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
-use types::config::Config as ChainConfig;
-use types::phase0::primitives::ForkDigest;
-use types::preset::Preset;
+use types::{config::Config as ChainConfig, phase0::primitives::ForkDigest, preset::Preset};
 
 use crate::types::EnrForkId;
 
@@ -203,7 +201,7 @@ pub struct Discovery<P: Preset> {
     /// Specifies whether various port numbers should be updated after the discovery service has been started
     update_ports: UpdatePorts,
 
-    pub phantom: PhantomData<P>,
+    phantom: PhantomData<P>,
 }
 
 impl<P: Preset> Discovery<P> {
@@ -485,6 +483,21 @@ impl<P: Preset> Discovery<P> {
         Ok(())
     }
 
+    /// Update the `cgc` field of our local ENR.
+    pub fn update_enr_cgc(&mut self, cgc: u64) -> Result<()> {
+        self.discv5
+            .enr_insert(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY, &cgc)
+            .map_err(|e| anyhow!("{:?}", e))?;
+
+        // persist modified enr to disk
+        enr::save_enr_to_disk(self.enr_dir.as_deref(), &self.local_enr());
+
+        // replace the global version
+        *self.network_globals.local_enr.write() = self.discv5.local_enr();
+
+        Ok(())
+    }
+
     /// Adds/Removes a subnet from the ENR attnets/syncnets Bitfield
     pub fn update_enr_bitfield(&mut self, subnet: Subnet, value: bool) -> Result<()> {
         let local_enr = self.discv5.local_enr();
@@ -551,26 +564,30 @@ impl<P: Preset> Discovery<P> {
         Ok(())
     }
 
-    /// Update the `cgc` field of our local ENR.
-    pub fn update_enr_cgc(&mut self, cgc: u64) -> Result<()> {
+    /// Update the `nfd` field of our local ENR.
+    pub fn update_enr_nfd(&mut self, next_fork_digest: ForkDigest) -> Result<()> {
+        info_with_peers!(
+            next_fork_digest = ?next_fork_digest,
+            "Updating the ENR next fork digest"
+        );
+
         self.discv5
-            .enr_insert(PEERDAS_CUSTODY_GROUP_COUNT_ENR_KEY, &cgc)
+            .enr_insert::<Bytes>(NEXT_FORK_DIGEST_ENR_KEY, &next_fork_digest.to_ssz()?.into())
             .map_err(|e| anyhow!("{:?}", e))?;
+
+        // replace the global version with discovery version
+        *self.network_globals.local_enr.write() = self.discv5.local_enr();
 
         // persist modified enr to disk
         enr::save_enr_to_disk(self.enr_dir.as_deref(), &self.local_enr());
-
-        // replace the global version
-        *self.network_globals.local_enr.write() = self.discv5.local_enr();
-
         Ok(())
     }
 
     /// Updates the `eth2` field of our local ENR.
     pub fn update_eth2_enr(&mut self, enr_fork_id: EnrForkId) {
         // to avoid having a reference to the spec constant, for the logging we assume
-        // FAR_FUTURE_EPOCH is u64::max_value()
-        let next_fork_epoch_log = if enr_fork_id.next_fork_epoch == u64::max_value() {
+        // FAR_FUTURE_EPOCH is u64::MAX
+        let next_fork_epoch_log = if enr_fork_id.next_fork_epoch == u64::MAX {
             String::from("No other fork")
         } else {
             format!("{:?}", enr_fork_id.next_fork_epoch)
@@ -602,25 +619,6 @@ impl<P: Preset> Discovery<P> {
 
         // persist modified enr to disk
         enr::save_enr_to_disk(self.enr_dir.as_deref(), &self.local_enr());
-    }
-
-    /// Update the `nfd` field of our local ENR.
-    pub fn update_enr_nfd(&mut self, next_fork_digest: ForkDigest) -> Result<()> {
-        info_with_peers!(
-            next_fork_digest = ?next_fork_digest,
-            "Updating the ENR next fork digest"
-        );
-
-        self.discv5
-            .enr_insert::<Bytes>(NEXT_FORK_DIGEST_ENR_KEY, &next_fork_digest.to_ssz()?.into())
-            .map_err(|e| anyhow!("{:?}", e))?;
-
-        // replace the global version with discovery version
-        *self.network_globals.local_enr.write() = self.discv5.local_enr();
-
-        // persist modified enr to disk
-        enr::save_enr_to_disk(self.enr_dir.as_deref(), &self.local_enr());
-        Ok(())
     }
 
     // Bans a peer and it's associated seen IP addresses.
