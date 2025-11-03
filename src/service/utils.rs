@@ -83,8 +83,6 @@ pub fn build_transport(
     Ok(transport)
 }
 
-// Useful helper functions for debugging. Currently not used in the client.
-#[allow(dead_code)]
 fn keypair_from_hex(hex_bytes: &str) -> Result<Keypair> {
     let hex_bytes = if let Some(stripped) = hex_bytes.strip_prefix("0x") {
         stripped.to_string()
@@ -97,7 +95,6 @@ fn keypair_from_hex(hex_bytes: &str) -> Result<Keypair> {
         .and_then(keypair_from_bytes)
 }
 
-#[allow(dead_code)]
 fn keypair_from_bytes(mut bytes: Vec<u8>) -> Result<Keypair> {
     secp256k1::SecretKey::try_from_bytes(&mut bytes)
         .map(|secret| {
@@ -111,7 +108,9 @@ fn keypair_from_bytes(mut bytes: Vec<u8>) -> Result<Keypair> {
 /// generated and is then saved to disk.
 ///
 /// Currently only secp256k1 keys are allowed, as these are the only keys supported by discv5.
+/// Supports both hex format (with or without 0x prefix) and raw bytes format.
 pub fn load_private_key(config: &NetworkConfig) -> Keypair {
+    // check for key from disk
     let mut network_key_f = None;
 
     if let Some(network_dir) = config.network_dir.as_ref() {
@@ -124,17 +123,54 @@ pub fn load_private_key(config: &NetworkConfig) -> Keypair {
 
     if let Some(network_key_f) = network_key_f.as_ref() {
         if let Ok(mut network_key_file) = File::open(network_key_f.clone()) {
-            let mut key_bytes: Vec<u8> = Vec::with_capacity(36);
-            match network_key_file.read_to_end(&mut key_bytes) {
-                Err(_) => debug_with_peers!("Could not read network key file"),
-                Ok(_) => {
-                    // only accept secp256k1 keys for now
-                    if let Ok(secret_key) = secp256k1::SecretKey::try_from_bytes(&mut key_bytes) {
-                        let kp: secp256k1::Keypair = secret_key.into();
-                        debug_with_peers!("Loaded network key from disk.");
-                        return kp.into();
-                    } else {
-                        debug_with_peers!("Network key file is not a valid secp256k1 key");
+            // Limit read to reasonable hex key size: 32 bytes = 64 hex chars + "0x" prefix + whitespace
+            let mut buffer = vec![0u8; 70];
+            match network_key_file.read(&mut buffer) {
+                Ok(bytes_read) => {
+                    if let Ok(hex_string) = String::from_utf8(buffer[..bytes_read].to_vec()) {
+                        // First try to parse as hex string
+                        let hex_content = hex_string.trim();
+                        if let Ok(keypair) = keypair_from_hex(hex_content) {
+                            debug_with_peers!("Loaded network key from disk (hex format).");
+                            return keypair;
+                        }
+                    }
+                }
+                Err(_) => {
+                    debug_with_peers!(
+                        "Could not read network key file as string, trying binary format"
+                    )
+                }
+            }
+
+            // If hex parsing failed or file couldn't be read as string, try binary format
+            if let Ok(mut network_key_file) = File::open(network_key_f.clone()) {
+                let mut key_bytes: Vec<u8> = Vec::with_capacity(36);
+                match network_key_file.read_to_end(&mut key_bytes) {
+                    Err(_) => debug_with_peers!("Could not read network key file"),
+                    Ok(_) => {
+                        // only accept secp256k1 keys for now
+                        if let Ok(secret_key) = secp256k1::SecretKey::try_from_bytes(&mut key_bytes)
+                        {
+                            let kp: secp256k1::Keypair = secret_key.clone().into();
+                            debug_with_peers!(
+                            "Loaded network key from disk (binary format), migrating to hex format."
+                        );
+
+                            // Migrate binary key to hex format
+                            let hex_key = hex::encode(secret_key.to_bytes());
+                            if let Err(e) = File::create(network_key_f.clone())
+                                .and_then(|mut f| f.write_all(hex_key.as_bytes()))
+                            {
+                                debug_with_peers!("Failed to migrate key to hex format: {}", e);
+                            } else {
+                                debug_with_peers!("Successfully migrated key to hex format.");
+                            }
+
+                            return kp.into();
+                        } else {
+                            debug_with_peers!("Network key file is not a valid secp256k1 key");
+                        }
                     }
                 }
             }
@@ -147,8 +183,9 @@ pub fn load_private_key(config: &NetworkConfig) -> Keypair {
     if let Some(network_dir) = config.network_dir.as_ref() {
         let network_key_f = network_dir.join(NETWORK_KEY_FILENAME);
         let _ = std::fs::create_dir_all(network_dir);
-        match File::create(network_key_f.clone())
-            .and_then(|mut f| f.write_all(&local_private_key.secret().to_bytes()))
+        let hex_key = hex::encode(local_private_key.secret().to_bytes());
+
+        match File::create(network_key_f.clone()).and_then(|mut f| f.write_all(hex_key.as_bytes()))
         {
             Ok(_) => {
                 debug_with_peers!("New network key generated and written to disk");
