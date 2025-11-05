@@ -281,8 +281,7 @@ pub static RESPONSE_IDLING: LazyLock<Result<Histogram>> = LazyLock::new(|| {
 });
 
 pub fn update_discovery_metrics() {
-    let metrics =
-        discv5::metrics::Metrics::from(discv5::Discv5::<discv5::DefaultProtocolId>::raw_metrics());
+    let metrics = discv5::metrics::Metrics::from(discv5::Discv5::raw_metrics());
 
     set_float_gauge(&DISCOVERY_REQS, metrics.unsolicited_requests_per_second);
     set_gauge(&DISCOVERY_SESSIONS, metrics.active_sessions as i64);
