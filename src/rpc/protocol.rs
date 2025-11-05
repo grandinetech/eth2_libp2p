@@ -86,21 +86,10 @@ pub static DATA_COLUMN_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
 
 /// Minimum SSZ size of SignedExecutionPayloadEnvelope (all variable fields at minimum).
 pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MIN: LazyLock<usize> = LazyLock::new(|| {
-    SignedExecutionPayloadEnvelope::<Mainnet> {
-        message: ExecutionPayloadEnvelope {
-            payload: ExecutionPayload::<Mainnet>::default(),
-            execution_requests: ExecutionRequests::<Mainnet>::default(),
-            builder_index: ValidatorIndex::default(),
-            beacon_block_root: H256::zero(),
-            slot: Slot::default(),
-            blob_kzg_commitments: ContiguousList::default(),
-            state_root: H256::zero(),
-        },
-        signature: SignatureBytes::default(),
-    }
-    .to_ssz()
-    .expect("should serialize")
-    .len()
+    SignedExecutionPayloadEnvelope::<Mainnet>::default()
+        .to_ssz()
+        .expect("should serialize")
+        .len()
 });
 
 /// Maximum SSZ size of SignedExecutionPayloadEnvelope.
