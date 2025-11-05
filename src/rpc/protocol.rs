@@ -83,15 +83,6 @@ pub static DATA_COLUMN_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
         .len()
 });
 
-/// Calculate max ExecutionPayload size.
-/// Formula: default_size + max_extra_data + (max_tx_count * (offset + max_tx_size))
-fn max_execution_payload_gloas_size<P: Preset>() -> usize {
-    let base_size = ExecutionPayload::<P>::default().to_ssz().expect("should serialize").len();
-    let max_extra_data_size = P::MaxExtraDataBytes::USIZE * u8::SIZE.get();
-    let max_transactions_size =
-        P::MaxTransactionsPerPayload::USIZE * (BYTES_PER_LENGTH_OFFSET + P::MaxBytesPerTransaction::USIZE);
-    base_size + max_extra_data_size + max_transactions_size
-}
 
 /// Minimum SSZ size of SignedExecutionPayloadEnvelope (all variable fields at minimum).
 pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MIN: LazyLock<usize> = LazyLock::new(|| {
@@ -113,28 +104,12 @@ pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MIN: LazyLock<usize> = LazyLo
 });
 
 /// Maximum SSZ size of SignedExecutionPayloadEnvelope.
-/// Formula: signed_envelope_default - default_payload + max_payload
+/// Uses .full() method which fills all variable-length fields to maximum.
 pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
-    let signed_envelope_size = SignedExecutionPayloadEnvelope::<Mainnet> {
-        message: ExecutionPayloadEnvelope {
-            payload: ExecutionPayload::<Mainnet>::default(),
-            execution_requests: ExecutionRequests::<Mainnet>::default(),
-            builder_index: ValidatorIndex::default(),
-            beacon_block_root: H256::zero(),
-            slot: Slot::default(),
-            blob_kzg_commitments: ContiguousList::default(),
-            state_root: H256::zero(),
-        },
-        signature: SignatureBytes::default(),
-    }
-    .to_ssz()
-    .expect("should serialize")
-    .len();
-    let default_payload_size = ExecutionPayload::<Mainnet>::default()
+    SignedExecutionPayloadEnvelope::<Mainnet>::full()
         .to_ssz()
         .expect("should serialize")
-        .len();
-    signed_envelope_size - default_payload_size + max_execution_payload_gloas_size::<Mainnet>()
+        .len()
 });
 
 pub const ERROR_TYPE_MIN: usize = 0;
