@@ -93,6 +93,8 @@ pub struct RateLimiterConfig {
     pub(super) blobs_by_root_quota: Quota,
     pub(super) data_columns_by_root_quota: Quota,
     pub(super) data_columns_by_range_quota: Quota,
+    pub(super) execution_payload_envelopes_by_range_quota: Quota,
+    pub(super) execution_payload_envelopes_by_root_quota: Quota,
     pub(super) light_client_bootstrap_quota: Quota,
     pub(super) light_client_optimistic_update_quota: Quota,
     pub(super) light_client_finality_update_quota: Quota,
@@ -126,6 +128,10 @@ impl RateLimiterConfig {
     pub const DEFAULT_LIGHT_CLIENT_OPTIMISTIC_UPDATE_QUOTA: Quota = Quota::one_every(10);
     pub const DEFAULT_LIGHT_CLIENT_FINALITY_UPDATE_QUOTA: Quota = Quota::one_every(10);
     pub const DEFAULT_LIGHT_CLIENT_UPDATES_BY_RANGE_QUOTA: Quota = Quota::one_every(10);
+    pub const DEFAULT_EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE_QUOTA: Quota =
+        Quota::n_every(NonZeroU64::new(128).unwrap(), 10);
+    pub const DEFAULT_EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT_QUOTA: Quota =
+        Quota::n_every(NonZeroU64::new(128).unwrap(), 10);
 }
 
 impl Default for RateLimiterConfig {
@@ -141,6 +147,10 @@ impl Default for RateLimiterConfig {
             blobs_by_root_quota: Self::DEFAULT_BLOBS_BY_ROOT_QUOTA,
             data_columns_by_root_quota: Self::DEFAULT_DATA_COLUMNS_BY_ROOT_QUOTA,
             data_columns_by_range_quota: Self::DEFAULT_DATA_COLUMNS_BY_RANGE_QUOTA,
+            execution_payload_envelopes_by_range_quota:
+                Self::DEFAULT_EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE_QUOTA,
+            execution_payload_envelopes_by_root_quota:
+                Self::DEFAULT_EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT_QUOTA,
             light_client_bootstrap_quota: Self::DEFAULT_LIGHT_CLIENT_BOOTSTRAP_QUOTA,
             light_client_optimistic_update_quota:
                 Self::DEFAULT_LIGHT_CLIENT_OPTIMISTIC_UPDATE_QUOTA,
@@ -179,6 +189,14 @@ impl Debug for RateLimiterConfig {
                 "data_columns_by_root",
                 fmt_q!(&self.data_columns_by_root_quota),
             )
+            .field(
+                "execution_payload_envelopes_by_range",
+                fmt_q!(&self.execution_payload_envelopes_by_range_quota),
+            )
+            .field(
+                "execution_payload_envelopes_by_root",
+                fmt_q!(&self.execution_payload_envelopes_by_root_quota),
+            )
             .finish()
     }
 }
@@ -201,6 +219,8 @@ impl FromStr for RateLimiterConfig {
         let mut blobs_by_root_quota = None;
         let mut data_columns_by_root_quota = None;
         let mut data_columns_by_range_quota = None;
+        let mut execution_payload_envelopes_by_range_quota = None;
+        let mut execution_payload_envelopes_by_root_quota = None;
         let mut light_client_bootstrap_quota = None;
         let mut light_client_optimistic_update_quota = None;
         let mut light_client_finality_update_quota = None;
@@ -221,6 +241,14 @@ impl FromStr for RateLimiterConfig {
                 }
                 Protocol::DataColumnsByRange => {
                     data_columns_by_range_quota = data_columns_by_range_quota.or(quota)
+                }
+                Protocol::ExecutionPayloadEnvelopesByRange => {
+                    execution_payload_envelopes_by_range_quota =
+                        execution_payload_envelopes_by_range_quota.or(quota)
+                }
+                Protocol::ExecutionPayloadEnvelopesByRoot => {
+                    execution_payload_envelopes_by_root_quota =
+                        execution_payload_envelopes_by_root_quota.or(quota)
                 }
                 Protocol::Ping => ping_quota = ping_quota.or(quota),
                 Protocol::MetaData => meta_data_quota = meta_data_quota.or(quota),
@@ -257,6 +285,10 @@ impl FromStr for RateLimiterConfig {
                 .unwrap_or(Self::DEFAULT_DATA_COLUMNS_BY_ROOT_QUOTA),
             data_columns_by_range_quota: data_columns_by_range_quota
                 .unwrap_or(Self::DEFAULT_DATA_COLUMNS_BY_RANGE_QUOTA),
+            execution_payload_envelopes_by_range_quota: execution_payload_envelopes_by_range_quota
+                .unwrap_or(Self::DEFAULT_EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE_QUOTA),
+            execution_payload_envelopes_by_root_quota: execution_payload_envelopes_by_root_quota
+                .unwrap_or(Self::DEFAULT_EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT_QUOTA),
             light_client_bootstrap_quota: light_client_bootstrap_quota
                 .unwrap_or(Self::DEFAULT_LIGHT_CLIENT_BOOTSTRAP_QUOTA),
             light_client_optimistic_update_quota: light_client_optimistic_update_quota
