@@ -23,6 +23,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     fulu::{containers::DataColumnsByRootIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     phase0::primitives::{Epoch, ForkDigest, H256, Slot},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -793,6 +794,43 @@ impl<P: Preset> DataColumnsByRootRequest<P> {
     }
 }
 
+/// Request a number of execution payload envelopes from a peer.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Ssz)]
+#[ssz(derive_hash = false)]
+pub struct ExecutionPayloadEnvelopesByRangeRequest {
+    /// The starting slot to request execution payload envelopes.
+    pub start_slot: Slot,
+    /// The number of slots from the start slot.
+    pub count: u64,
+}
+
+impl ExecutionPayloadEnvelopesByRangeRequest {
+    pub fn new(start_slot: Slot, count: u64) -> Self {
+        Self { start_slot, count }
+    }
+
+    pub fn max_requested(&self) -> u64 {
+        self.count
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExecutionPayloadEnvelopesByRootRequest {
+    /// The list of beacon block roots being requested.
+    pub block_roots: DynamicList<H256>,
+}
+
+impl ExecutionPayloadEnvelopesByRootRequest {
+    pub fn new(config: &ChainConfig, block_roots: impl Iterator<Item = H256>) -> Self {
+        let block_roots =
+            DynamicList::from_iter_with_maximum(block_roots, config.max_request_payloads as usize);
+        Self { block_roots }
+    }
+
+    pub fn max_requested(&self) -> usize {
+        self.block_roots.len()
+    }
+}
 /// Request a number of beacon data columns from a peer.
 #[derive(Clone, Debug, PartialEq, Ssz)]
 pub struct LightClientUpdatesByRangeRequest {
@@ -847,6 +885,12 @@ pub enum RpcSuccessResponse<P: Preset> {
     /// A response to a get DATA_COLUMN_SIDECARS_BY_RANGE request.
     DataColumnsByRange(Arc<DataColumnSidecar<P>>),
 
+    /// A response to a get EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE request.
+    ExecutionPayloadEnvelopesByRange(Arc<SignedExecutionPayloadEnvelope<P>>),
+
+    /// A response to a get EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT request.
+    ExecutionPayloadEnvelopesByRoot(Arc<SignedExecutionPayloadEnvelope<P>>),
+
     /// A PONG response to a PING request.
     Pong(Ping),
 
@@ -875,6 +919,12 @@ pub enum ResponseTermination {
     /// Data column sidecars by range stream termination.
     DataColumnsByRange,
 
+    /// Execution payload envelopes by range stream termination.
+    ExecutionPayloadEnvelopesByRange,
+
+    /// Execution payload envelopes by root stream termination.
+    ExecutionPayloadEnvelopesByRoot,
+
     /// Light client updates by range stream termination.
     LightClientUpdatesByRange,
 }
@@ -888,6 +938,12 @@ impl ResponseTermination {
             ResponseTermination::BlobsByRoot => Protocol::BlobsByRoot,
             ResponseTermination::DataColumnsByRoot => Protocol::DataColumnsByRoot,
             ResponseTermination::DataColumnsByRange => Protocol::DataColumnsByRange,
+            ResponseTermination::ExecutionPayloadEnvelopesByRange => {
+                Protocol::ExecutionPayloadEnvelopesByRange
+            }
+            ResponseTermination::ExecutionPayloadEnvelopesByRoot => {
+                Protocol::ExecutionPayloadEnvelopesByRoot
+            }
             ResponseTermination::LightClientUpdatesByRange => Protocol::LightClientUpdatesByRange,
         }
     }
@@ -983,6 +1039,12 @@ impl<P: Preset> RpcSuccessResponse<P> {
             RpcSuccessResponse::BlobsByRoot(_) => Protocol::BlobsByRoot,
             RpcSuccessResponse::DataColumnsByRoot(_) => Protocol::DataColumnsByRoot,
             RpcSuccessResponse::DataColumnsByRange(_) => Protocol::DataColumnsByRange,
+            RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(_) => {
+                Protocol::ExecutionPayloadEnvelopesByRange
+            }
+            RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(_) => {
+                Protocol::ExecutionPayloadEnvelopesByRoot
+            }
             RpcSuccessResponse::Pong(_) => Protocol::Ping,
             RpcSuccessResponse::MetaData(_) => Protocol::MetaData,
             RpcSuccessResponse::LightClientBootstrap(_) => Protocol::LightClientBootstrap,
@@ -1004,6 +1066,10 @@ impl<P: Preset> RpcSuccessResponse<P> {
             }
             RpcSuccessResponse::DataColumnsByRange(column)
             | RpcSuccessResponse::DataColumnsByRoot(column) => Some(column.slot()),
+            RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(envelope)
+            | RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(envelope) => {
+                Some(envelope.message.slot)
+            }
             RpcSuccessResponse::LightClientBootstrap(b) => Some(b.slot()),
             RpcSuccessResponse::LightClientOptimisticUpdate(update) => {
                 Some(update.signature_slot())
@@ -1070,6 +1136,14 @@ impl<P: Preset> std::fmt::Display for RpcSuccessResponse<P> {
                     f,
                     "DataColumnsByRange: Data column slot: {}",
                     sidecar.slot()
+                )
+            }
+            RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(envelope)
+            | RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(envelope) => {
+                write!(
+                    f,
+                    "ExecutionPayloadEnvelope: slot: {}",
+                    envelope.message.slot
                 )
             }
             RpcSuccessResponse::Pong(ping) => write!(f, "Pong: {}", ping.data),
