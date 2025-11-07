@@ -1,8 +1,8 @@
 //! Handles the encoding and decoding of pubsub messages.
 
-use crate::types::{ForkContext, GossipEncoding, GossipKind, GossipTopic};
 use crate::TopicHash;
-use snap::raw::{decompress_len, Decoder, Encoder};
+use crate::types::{ForkContext, GossipEncoding, GossipKind, GossipTopic};
+use snap::raw::{Decoder, Encoder, decompress_len};
 use ssz::{SszReadDefault, SszWrite as _, WriteError};
 use std::boxed::Box;
 use std::io::{Error, ErrorKind};
@@ -215,7 +215,7 @@ impl<P: Preset> PubsubMessage<P> {
                                 return Err(format!(
                                     "Unknown gossipsub fork digest: {:?}",
                                     gossip_topic.fork_digest
-                                ))
+                                ));
                             }
                         };
 
@@ -252,7 +252,7 @@ impl<P: Preset> PubsubMessage<P> {
                                 return Err(format!(
                                     "Unknown gossipsub fork digest: {:?}",
                                     gossip_topic.fork_digest
-                                ))
+                                ));
                             }
                         }
                     }
@@ -292,7 +292,7 @@ impl<P: Preset> PubsubMessage<P> {
                                 return Err(format!(
                                     "Unknown gossipsub fork digest: {:?}",
                                     gossip_topic.fork_digest
-                                ))
+                                ));
                             }
                         };
                         Ok(PubsubMessage::BeaconBlock(Arc::new(beacon_block)))
@@ -394,7 +394,7 @@ impl<P: Preset> PubsubMessage<P> {
                                 return Err(format!(
                                     "Unknown gossipsub fork digest: {:?}",
                                     gossip_topic.fork_digest
-                                ))
+                                ));
                             }
                         };
 
@@ -424,97 +424,83 @@ impl<P: Preset> PubsubMessage<P> {
                         )))
                     }
                     GossipKind::LightClientFinalityUpdate => {
-                        let light_client_finality_update =
-                            match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
-                                Some(Phase::Phase0) => {
-                                    return Err(format!(
-                                        "light_client_finality_update topic invalid for given fork digest {:?}",
-                                        gossip_topic.fork_digest,
-                                    ))
-                                }
-                                Some(Phase::Altair | Phase::Bellatrix) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientFinalityUpdate::Altair)
-                                        .map_err(|e| format!("{:?}", e))?
-                                        .into()
-                                }
-                                Some(Phase::Capella) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientFinalityUpdate::Capella)
-                                        .map_err(|e| format!("{:?}", e))?
-                                        .into()
-                                }
-                                Some(Phase::Deneb) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientFinalityUpdate::Deneb)
-                                        .map_err(|e| format!("{:?}", e))?
-                                        .into()
-                                }
-                                Some(Phase::Electra) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientFinalityUpdate::Electra)
-                                        .map_err(|e| format!("{:?}", e))?
-                                        .into()
-                                }
-                                Some(Phase::Fulu) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientFinalityUpdate::Fulu)
-                                        .map_err(|e| format!("{:?}", e))?
-                                        .into()
-                                }
-                                None => {
-                                    return Err(format!(
-                                        "light_client_finality_update topic invalid for given fork digest {:?}",
-                                        gossip_topic.fork_digest,
-                                    ))
-                                }
-                            };
+                        let light_client_finality_update = match fork_context
+                            .get_fork_from_context_bytes(gossip_topic.fork_digest)
+                        {
+                            Some(Phase::Phase0) => {
+                                return Err(format!(
+                                    "light_client_finality_update topic invalid for given fork digest {:?}",
+                                    gossip_topic.fork_digest,
+                                ));
+                            }
+                            Some(Phase::Altair | Phase::Bellatrix) => {
+                                SszReadDefault::from_ssz_default(data)
+                                    .map(LightClientFinalityUpdate::Altair)
+                                    .map_err(|e| format!("{:?}", e))?
+                                    .into()
+                            }
+                            Some(Phase::Capella) => SszReadDefault::from_ssz_default(data)
+                                .map(LightClientFinalityUpdate::Capella)
+                                .map_err(|e| format!("{:?}", e))?
+                                .into(),
+                            Some(Phase::Deneb) => SszReadDefault::from_ssz_default(data)
+                                .map(LightClientFinalityUpdate::Deneb)
+                                .map_err(|e| format!("{:?}", e))?
+                                .into(),
+                            Some(Phase::Electra) => SszReadDefault::from_ssz_default(data)
+                                .map(LightClientFinalityUpdate::Electra)
+                                .map_err(|e| format!("{:?}", e))?
+                                .into(),
+                            Some(Phase::Fulu) => SszReadDefault::from_ssz_default(data)
+                                .map(LightClientFinalityUpdate::Fulu)
+                                .map_err(|e| format!("{:?}", e))?
+                                .into(),
+                            None => {
+                                return Err(format!(
+                                    "light_client_finality_update topic invalid for given fork digest {:?}",
+                                    gossip_topic.fork_digest,
+                                ));
+                            }
+                        };
 
                         Ok(PubsubMessage::LightClientFinalityUpdate(Box::new(
                             light_client_finality_update,
                         )))
                     }
                     GossipKind::LightClientOptimisticUpdate => {
-                        let light_client_optimistic_update =
-                            match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
-                                Some(Phase::Phase0) => {
-                                    return Err(format!(
-                                        "light_client_optimistic_update topic invalid for given fork digest {:?}",
-                                        gossip_topic.fork_digest,
-                                    ))
-                                }
-                                Some(Phase::Altair | Phase::Bellatrix) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientOptimisticUpdate::Altair)
-                                        .map_err(|e| format!("{:?}", e))?
-                                }
-                                Some(Phase::Capella) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientOptimisticUpdate::Capella)
-                                        .map_err(|e| format!("{:?}", e))?
-                                }
-                                Some(Phase::Deneb) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientOptimisticUpdate::Deneb)
-                                        .map_err(|e| format!("{:?}", e))?
-                                }
-                                Some(Phase::Electra) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientOptimisticUpdate::Electra)
-                                        .map_err(|e| format!("{:?}", e))?
-                                }
-                                Some(Phase::Fulu) => {
-                                    SszReadDefault::from_ssz_default(data)
-                                        .map(LightClientOptimisticUpdate::Fulu)
-                                        .map_err(|e| format!("{:?}", e))?
-                                }
-                                None => {
-                                    return Err(format!(
-                                        "light_client_optimistic_update topic invalid for given fork digest {:?}",
-                                        gossip_topic.fork_digest
-                                    ))
-                                }
-                            };
+                        let light_client_optimistic_update = match fork_context
+                            .get_fork_from_context_bytes(gossip_topic.fork_digest)
+                        {
+                            Some(Phase::Phase0) => {
+                                return Err(format!(
+                                    "light_client_optimistic_update topic invalid for given fork digest {:?}",
+                                    gossip_topic.fork_digest,
+                                ));
+                            }
+                            Some(Phase::Altair | Phase::Bellatrix) => {
+                                SszReadDefault::from_ssz_default(data)
+                                    .map(LightClientOptimisticUpdate::Altair)
+                                    .map_err(|e| format!("{:?}", e))?
+                            }
+                            Some(Phase::Capella) => SszReadDefault::from_ssz_default(data)
+                                .map(LightClientOptimisticUpdate::Capella)
+                                .map_err(|e| format!("{:?}", e))?,
+                            Some(Phase::Deneb) => SszReadDefault::from_ssz_default(data)
+                                .map(LightClientOptimisticUpdate::Deneb)
+                                .map_err(|e| format!("{:?}", e))?,
+                            Some(Phase::Electra) => SszReadDefault::from_ssz_default(data)
+                                .map(LightClientOptimisticUpdate::Electra)
+                                .map_err(|e| format!("{:?}", e))?,
+                            Some(Phase::Fulu) => SszReadDefault::from_ssz_default(data)
+                                .map(LightClientOptimisticUpdate::Fulu)
+                                .map_err(|e| format!("{:?}", e))?,
+                            None => {
+                                return Err(format!(
+                                    "light_client_optimistic_update topic invalid for given fork digest {:?}",
+                                    gossip_topic.fork_digest
+                                ));
+                            }
+                        };
 
                         Ok(PubsubMessage::LightClientOptimisticUpdate(Box::new(
                             light_client_optimistic_update,

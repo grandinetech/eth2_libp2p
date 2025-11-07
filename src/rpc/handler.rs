@@ -9,26 +9,26 @@ use crate::rpc::outbound::OutboundFramed;
 use crate::rpc::protocol::InboundFramed;
 use crate::types::ForkContext;
 use fnv::FnvHashMap;
-use futures::prelude::*;
 use futures::SinkExt;
+use futures::prelude::*;
 use helper_functions::misc;
+use libp2p::PeerId;
 use libp2p::swarm::handler::{
     ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, DialUpgradeError,
     FullyNegotiatedInbound, FullyNegotiatedOutbound, StreamUpgradeError, SubstreamProtocol,
 };
 use libp2p::swarm::{ConnectionId, Stream};
-use libp2p::PeerId;
 use logging::exception;
 use smallvec::SmallVec;
 use std::{
-    collections::{hash_map::Entry, VecDeque},
+    collections::{VecDeque, hash_map::Entry},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
-use tokio::time::{sleep, Sleep};
-use tokio_util::time::{delay_queue, DelayQueue};
+use tokio::time::{Sleep, sleep};
+use tokio_util::time::{DelayQueue, delay_queue};
 use tracing::{debug, trace};
 use types::preset::Preset;
 

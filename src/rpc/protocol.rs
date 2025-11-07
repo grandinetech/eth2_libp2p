@@ -6,7 +6,7 @@ use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, StreamExt};
 use helper_functions::misc;
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
-use ssz::{ReadError, SszSize as _, SszWrite as _, WriteError, H256};
+use ssz::{H256, ReadError, SszSize as _, SszWrite as _, WriteError};
 use std::io;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -957,7 +957,7 @@ impl RPCError {
     /// Used for metrics.
     pub fn as_static_str(&self) -> &'static str {
         match self {
-            RPCError::ErrorResponse(ref code, ..) => code.into(),
+            RPCError::ErrorResponse(code, ..) => code.into(),
             e => e.into(),
         }
     }

@@ -1,13 +1,13 @@
 #![cfg(test)]
-use eth2_libp2p::service::Network as LibP2PService;
-use eth2_libp2p::types::{EnrForkId, ForkContext};
 use eth2_libp2p::Multiaddr;
 use eth2_libp2p::TaskExecutor;
+use eth2_libp2p::service::Network as LibP2PService;
+use eth2_libp2p::types::{EnrForkId, ForkContext};
 use eth2_libp2p::{Context, Enr, EnrExt};
 use eth2_libp2p::{NetworkConfig, NetworkEvent};
 use std::sync::Arc;
 use std_ext::ArcExt as _;
-use tracing::{debug, error, info_span, Instrument};
+use tracing::{Instrument, debug, error, info_span};
 use tracing_subscriber::EnvFilter;
 use types::{config::Config as ChainConfig, nonstandard::Phase, preset::Preset};
 

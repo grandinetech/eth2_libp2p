@@ -1,40 +1,40 @@
 use self::gossip_cache::GossipCache;
-use crate::config::{gossipsub_config, GossipsubConfigParams, NetworkLoad};
+use crate::EnrExt;
+use crate::config::{GossipsubConfigParams, NetworkLoad, gossipsub_config};
 use crate::discovery::{
-    subnet_predicate, DiscoveredPeers, Discovery, FIND_NODE_QUERY_CLOSEST_PEERS,
+    DiscoveredPeers, Discovery, FIND_NODE_QUERY_CLOSEST_PEERS, subnet_predicate,
 };
 use crate::peer_manager::{
-    config::Config as PeerManagerCfg, peerdb::score::PeerAction, peerdb::score::ReportSource,
-    ConnectionDirection, PeerManager, PeerManagerEvent,
+    ConnectionDirection, PeerManager, PeerManagerEvent, config::Config as PeerManagerCfg,
+    peerdb::score::PeerAction, peerdb::score::ReportSource,
 };
 use crate::peer_manager::{MIN_OUTBOUND_ONLY_FACTOR, PEER_EXCESS_FACTOR, PRIORITY_PEER_EXCESS};
 use crate::rpc::methods::MetadataRequest;
 use crate::rpc::{
-    GoodbyeReason, HandlerErr, InboundRequestId, Protocol, RPCError, RPCMessage, RPCReceived,
-    RequestType, ResponseTermination, RpcResponse, RpcSuccessResponse, RPC,
+    GoodbyeReason, HandlerErr, InboundRequestId, Protocol, RPC, RPCError, RPCMessage, RPCReceived,
+    RequestType, ResponseTermination, RpcResponse, RpcSuccessResponse,
 };
 use crate::types::{
-    all_topics_at_fork, core_topics_to_subscribe, is_fork_non_core_topic, subnet_from_topic_hash,
     EnrForkId, ForkContext, GossipEncoding, GossipKind, GossipTopic, SnappyTransform, Subnet,
-    SubnetDiscovery,
+    SubnetDiscovery, all_topics_at_fork, core_topics_to_subscribe, is_fork_non_core_topic,
+    subnet_from_topic_hash,
 };
-use crate::EnrExt;
-use crate::{metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
-use crate::{task_executor, Eth2Enr};
-use anyhow::{anyhow, Error, Result};
+use crate::{Enr, NetworkGlobals, PubsubMessage, TopicHash, metrics};
+use crate::{Eth2Enr, task_executor};
+use anyhow::{Error, Result, anyhow};
 use api_types::{AppRequestId, Response};
 use futures::stream::StreamExt;
 use gossipsub::{
     IdentTopic as Topic, MessageAcceptance, MessageAuthenticity, MessageId, PublishError,
     TopicScoreParams,
 };
-use gossipsub_scoring_parameters::{peer_gossip_thresholds, PeerScoreSettings};
+use gossipsub_scoring_parameters::{PeerScoreSettings, peer_gossip_thresholds};
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::{self, Multiaddr, Protocol as MProtocol};
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::{NetworkBehaviour, Swarm, SwarmEvent};
 use libp2p::upnp::tokio::Behaviour as Upnp;
-use libp2p::{identify, PeerId, SwarmBuilder};
+use libp2p::{PeerId, SwarmBuilder, identify};
 use logging::exception;
 use std::num::{NonZeroU8, NonZeroUsize};
 use std::path::PathBuf;
@@ -56,7 +56,7 @@ use types::{
     },
     preset::Preset,
 };
-use utils::{build_transport, strip_peer_id, Context as ServiceContext};
+use utils::{Context as ServiceContext, build_transport, strip_peer_id};
 
 pub mod api_types;
 mod gossip_cache;

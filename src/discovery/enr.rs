@@ -3,12 +3,12 @@
 pub use discv5::enr::CombinedKey;
 use types::phase0::primitives::ForkDigest;
 
-use super::enr_ext::CombinedKeyExt;
 use super::ENR_FILENAME;
-use crate::types::{Enr, EnrAttestationBitfield, EnrForkId, EnrSyncCommitteeBitfield};
+use super::enr_ext::CombinedKeyExt;
 use crate::NetworkConfig;
+use crate::types::{Enr, EnrAttestationBitfield, EnrForkId, EnrSyncCommitteeBitfield};
 use alloy_rlp::bytes::Bytes;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use libp2p::identity::Keypair;
 use ssz::{SszReadDefault as _, SszWrite};
@@ -19,7 +19,7 @@ use std::str::FromStr;
 use tracing::{debug, warn};
 use types::{config::Config as ChainConfig, preset::Preset};
 
-use super::enr_ext::{EnrExt, QUIC6_ENR_KEY, QUIC_ENR_KEY};
+use super::enr_ext::{EnrExt, QUIC_ENR_KEY, QUIC6_ENR_KEY};
 
 /// The ENR field specifying the fork id.
 pub const ETH2_ENR_KEY: &str = "eth2";

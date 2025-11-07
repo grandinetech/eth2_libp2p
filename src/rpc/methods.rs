@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 use std::{ops::Deref, sync::Arc};
 use strum::IntoStaticStr;
 use try_from_iterator::TryFromIterator as _;
-use typenum::{Unsigned as _, U256};
+use typenum::{U256, Unsigned as _};
 use types::deneb::containers::BlobIdentifier;
 use types::nonstandard::Phase;
 use types::{
@@ -26,7 +26,7 @@ use types::{
         containers::{DataColumnSidecar, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    phase0::primitives::{Epoch, ForkDigest, Slot, H256},
+    phase0::primitives::{Epoch, ForkDigest, H256, Slot},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -1038,13 +1038,16 @@ impl std::fmt::Display for RpcErrorResponse {
 
 impl std::fmt::Display for StatusMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Status Message: Fork Digest: {:?}, Finalized Root: {}, Finalized Epoch: {}, Head Root: {}, Head Slot: {} Earliest available slot: {:?}",
-        self.fork_digest(),
-        self.finalized_root(),
-        self.finalized_epoch(),
-        self.head_root(),
-        self.head_slot(),
-        self.earliest_available_slot())
+        write!(
+            f,
+            "Status Message: Fork Digest: {:?}, Finalized Root: {}, Finalized Epoch: {}, Head Root: {}, Head Slot: {} Earliest available slot: {:?}",
+            self.fork_digest(),
+            self.finalized_root(),
+            self.finalized_epoch(),
+            self.head_root(),
+            self.head_slot(),
+            self.earliest_available_slot()
+        )
     }
 }
 

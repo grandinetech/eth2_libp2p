@@ -1,7 +1,7 @@
 //! Handles individual sync status for peers.
 
 use serde::Serialize;
-use types::phase0::primitives::{Epoch, Slot, H256};
+use types::phase0::primitives::{Epoch, H256, Slot};
 
 #[derive(Clone, Debug, Serialize)]
 /// The current sync status of the peer.

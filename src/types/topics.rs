@@ -534,8 +534,10 @@ mod tests {
         let s = get_sampling_subnets();
         let topic_config = get_topic_config(s);
         for phase in enum_iterator::all() {
-            assert!(core_topics_to_subscribe(&config, phase, &topic_config)
-                .contains(&GossipKind::BeaconBlock));
+            assert!(
+                core_topics_to_subscribe(&config, phase, &topic_config)
+                    .contains(&GossipKind::BeaconBlock)
+            );
         }
     }
 

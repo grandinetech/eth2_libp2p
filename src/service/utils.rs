@@ -5,13 +5,13 @@ use crate::types::{
     GossipKind,
 };
 use crate::{GossipTopic, NetworkConfig};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures::future::Either;
 use gossipsub;
 use libp2p::core::{multiaddr::Multiaddr, muxing::StreamMuxerBox, transport::Boxed};
-use libp2p::identity::{secp256k1, Keypair};
+use libp2p::identity::{Keypair, secp256k1};
 use libp2p::metrics::Registry;
-use libp2p::{core, noise, yamux, PeerId, Transport};
+use libp2p::{PeerId, Transport, core, noise, yamux};
 use ssz::SszReadDefault;
 use std::collections::HashSet;
 use std::fs::File;
@@ -152,8 +152,8 @@ pub fn load_private_key(config: &NetworkConfig) -> Keypair {
                         {
                             let kp: secp256k1::Keypair = secret_key.clone().into();
                             debug!(
-                            "Loaded network key from disk (binary format), migrating to hex format."
-                        );
+                                "Loaded network key from disk (binary format), migrating to hex format."
+                            );
 
                             // Migrate binary key to hex format
                             let hex_key = hex::encode(secret_key.to_bytes());

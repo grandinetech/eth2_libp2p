@@ -1,10 +1,10 @@
+use crate::PeerId;
 use crate::common::metrics;
 use crate::rpc::config::InboundRateLimiterConfig;
 use crate::rpc::rate_limiter::{RPCRateLimiter, RateLimitedErr};
 use crate::rpc::self_limiter::timestamp_now;
 use crate::rpc::{Protocol, RpcResponse, SubstreamId};
 use crate::types::ForkContext;
-use crate::PeerId;
 use futures::FutureExt;
 use libp2p::swarm::ConnectionId;
 use logging::exception;

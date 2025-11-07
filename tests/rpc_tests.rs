@@ -1,14 +1,13 @@
 #![cfg(test)]
-use common::{build_tracing_subscriber, Protocol};
-use eth2_libp2p::rpc::{methods::*, RequestType};
-use eth2_libp2p::{service::api_types::AppRequestId, NetworkEvent, ReportSource, Response};
+use common::{Protocol, build_tracing_subscriber};
+use eth2_libp2p::rpc::{RequestType, methods::*};
+use eth2_libp2p::{NetworkEvent, ReportSource, Response, service::api_types::AppRequestId};
 use helper_functions::misc;
 use ssz::{ByteList, ContiguousList, DynamicList, SszRead as _, SszReadDefault, SszWrite};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use tracing::{debug, error, warn};
-use tracing::{info_span, Instrument};
+use tracing::{Instrument, debug, error, info_span, warn};
 use try_from_iterator::TryFromIterator;
 use typenum::Unsigned as _;
 use types::deneb::containers::BlobSidecar;
@@ -1153,7 +1152,7 @@ async fn test_tcp_columns_by_range_chunked_rpc() {
     }
 }
 
-// Tests a streamed, chunked BlocksByRoot RPC Message terminates when all expected reponses have been received
+// Tests a streamed, chunked BlocksByRoot RPC Message terminates when all expected responses have been received
 #[tokio::test]
 async fn test_tcp_blocks_by_root_chunked_rpc_terminates_correctly() {
     // set up the logging. The level and enabled logging or not

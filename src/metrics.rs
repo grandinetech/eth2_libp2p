@@ -10,10 +10,10 @@ pub use crate::common::metrics::{
     try_create_int_gauge, try_create_int_gauge_vec,
 };
 use crate::{
+    GossipTopic, Gossipsub, NetworkGlobals,
     common::metrics::{get_int_gauge, set_gauge_entry, try_create_histogram},
     peer_manager::peerdb::client::ClientKind,
     types::GossipKind,
-    GossipTopic, Gossipsub, NetworkGlobals,
 };
 use prometheus::{
     Gauge, GaugeVec, Histogram, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Result,
