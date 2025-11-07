@@ -3,7 +3,7 @@
 use crate::common::time_cache::LRUTimeCache;
 use crate::discovery::{enr_ext::EnrExt, peer_id_to_node_id};
 use crate::rpc::{GoodbyeReason, MetaData, Protocol, RPCError, RpcErrorResponse};
-use crate::{metrics, Gossipsub, NetworkGlobals, PeerId, Subnet, SubnetDiscovery};
+use crate::{Gossipsub, NetworkGlobals, PeerId, Subnet, SubnetDiscovery, metrics};
 use anyhow::Result;
 use delay_map::HashSetDelay;
 use discv5::Enr;
@@ -30,7 +30,7 @@ use libp2p::multiaddr;
 pub use peerdb::peer_info::{ConnectionDirection, PeerConnectionStatus, PeerInfo};
 use peerdb::score::{PeerAction, ReportSource};
 pub use peerdb::sync_status::{SyncInfo, SyncStatus};
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 use std::net::IpAddr;
 use strum::IntoEnumIterator;
 
@@ -1702,8 +1702,8 @@ enum ConnectingType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rpc::MetaDataV3;
     use crate::NetworkConfig;
+    use crate::rpc::MetaDataV3;
     use types::{
         config::Config as ChainConfig, nonstandard::Phase, phase0::primitives::ForkDigest,
         preset::Mainnet,
@@ -1819,32 +1819,40 @@ mod tests {
         // Check that one outbound-only peer was removed because it had the worst score
         // and that we did not disconnect the other outbound peer due to the minimum outbound quota.
         assert_eq!(peer_manager.network_globals.connected_or_dialing_peers(), 3);
-        assert!(peer_manager
-            .network_globals
-            .peers
-            .read()
-            .is_connected(&outbound_only_peer1));
-        assert!(!peer_manager
-            .network_globals
-            .peers
-            .read()
-            .is_connected(&outbound_only_peer2));
+        assert!(
+            peer_manager
+                .network_globals
+                .peers
+                .read()
+                .is_connected(&outbound_only_peer1)
+        );
+        assert!(
+            !peer_manager
+                .network_globals
+                .peers
+                .read()
+                .is_connected(&outbound_only_peer2)
+        );
 
         // The trusted peer remains connected
-        assert!(peer_manager
-            .network_globals
-            .peers
-            .read()
-            .is_connected(&trusted_peer));
+        assert!(
+            peer_manager
+                .network_globals
+                .peers
+                .read()
+                .is_connected(&trusted_peer)
+        );
 
         peer_manager.heartbeat();
 
         // The trusted peer remains connected, even after subsequent heartbeats.
-        assert!(peer_manager
-            .network_globals
-            .peers
-            .read()
-            .is_connected(&trusted_peer));
+        assert!(
+            peer_manager
+                .network_globals
+                .peers
+                .read()
+                .is_connected(&trusted_peer)
+        );
 
         // Check that if we are at target number of peers, we do not disconnect any.
         assert_eq!(peer_manager.network_globals.connected_or_dialing_peers(), 3);
@@ -2162,13 +2170,7 @@ mod tests {
             // id mod % 4
             // except for the last 5 peers which all go on their own subnets
             // So subnets 0-2 should have 4 peers subnet 3 should have 3 and 15-19 should have 1
-            let subnet: u64 = {
-                if x < 15 {
-                    x % 4
-                } else {
-                    x
-                }
-            };
+            let subnet: u64 = { if x < 15 { x % 4 } else { x } };
 
             let peer = PeerId::random();
             peer_manager.inject_connect_ingoing(&peer, "/ip4/0.0.0.0".parse().unwrap(), None);

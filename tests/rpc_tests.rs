@@ -1,14 +1,14 @@
 #![cfg(test)]
-use common::{build_tracing_subscriber, Protocol};
-use eth2_libp2p::rpc::{methods::*, RequestType};
-use eth2_libp2p::{service::api_types::AppRequestId, NetworkEvent, ReportSource, Response};
+use common::{Protocol, build_tracing_subscriber};
+use eth2_libp2p::rpc::{RequestType, methods::*};
+use eth2_libp2p::{NetworkEvent, ReportSource, Response, service::api_types::AppRequestId};
 use helper_functions::misc;
 use logging::{debug_with_peers, error_with_peers, warn_with_peers};
 use ssz::{ByteList, ContiguousList, DynamicList, SszRead as _, SszReadDefault, SszWrite};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use tracing::{info_span, Instrument};
+use tracing::{Instrument, info_span};
 use try_from_iterator::TryFromIterator;
 use typenum::Unsigned as _;
 use types::deneb::containers::BlobSidecar;

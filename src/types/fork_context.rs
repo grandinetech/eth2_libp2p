@@ -7,7 +7,7 @@ use types::{
     nonstandard::Phase,
     phase0::{
         consts::FAR_FUTURE_EPOCH,
-        primitives::{Epoch, ForkDigest, Slot, H256},
+        primitives::{Epoch, ForkDigest, H256, Slot},
     },
     preset::Preset,
 };
@@ -272,9 +272,11 @@ mod tests {
         );
 
         let invalid_digest = ForkDigest::from_slice(&[9, 9, 9, 9]);
-        assert!(context
-            .get_fork_from_context_bytes(invalid_digest)
-            .is_none());
+        assert!(
+            context
+                .get_fork_from_context_bytes(invalid_digest)
+                .is_none()
+        );
     }
 
     #[test]
