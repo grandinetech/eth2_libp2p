@@ -7,13 +7,14 @@ use crate::types::ForkContext;
 use crate::PeerId;
 use futures::FutureExt;
 use libp2p::swarm::ConnectionId;
-use logging::{debug_with_peers, exception};
+use logging::exception;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio_util::time::DelayQueue;
+use tracing::debug;
 use types::preset::Preset;
 
 /// A response that was rate limited or waiting on rate limited responses for the same peer and
@@ -62,7 +63,7 @@ impl<P: Preset> ResponseLimiter<P> {
     ) -> bool {
         // First check that there are not already other responses waiting to be sent.
         if let Some(queue) = self.delayed_responses.get_mut(&(peer_id, protocol)) {
-            debug_with_peers!(%peer_id, %protocol, "Response rate limiting since there are already other responses waiting to be sent");
+            debug!(%peer_id, %protocol, "Response rate limiting since there are already other responses waiting to be sent");
             queue.push_back(QueuedResponse {
                 peer_id,
                 connection_id,
@@ -116,7 +117,7 @@ impl<P: Preset> ResponseLimiter<P> {
                     Ok(())
                 }
                 RateLimitedErr::TooSoon(wait_time) => {
-                    debug_with_peers!(%peer_id, %protocol, wait_time_ms = wait_time.as_millis(), "Response rate limiting");
+                    debug!(%peer_id, %protocol, wait_time_ms = wait_time.as_millis(), "Response rate limiting");
                     Err(wait_time)
                 }
             },

@@ -11,12 +11,12 @@ use alloy_rlp::bytes::Bytes;
 use anyhow::{anyhow, Result};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use libp2p::identity::Keypair;
-use logging::{debug_with_peers, warn_with_peers};
 use ssz::{SszReadDefault as _, SszWrite};
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 use std::str::FromStr;
+use tracing::{debug, warn};
 use types::{config::Config as ChainConfig, preset::Preset};
 
 use super::enr_ext::{EnrExt, QUIC6_ENR_KEY, QUIC_ENR_KEY};
@@ -118,14 +118,14 @@ pub fn use_or_load_enr(
         if let Ok(mut enr_file) = File::open(enr_f.clone()) {
             let mut enr_string = String::new();
             match enr_file.read_to_string(&mut enr_string) {
-                Err(_) => debug_with_peers!("Could not read ENR from file"),
+                Err(_) => debug!("Could not read ENR from file"),
                 Ok(_) => {
                     match Enr::from_str(&enr_string) {
                         Ok(disk_enr) => {
                             // if the same node id, then we may need to update our sequence number
                             if local_enr.node_id() == disk_enr.node_id() {
                                 if compare_enr(local_enr, &disk_enr) {
-                                    debug_with_peers!(file = ?enr_f,"ENR loaded from disk");
+                                    debug!(file = ?enr_f,"ENR loaded from disk");
                                     // the stored ENR has the same configuration, use it
                                     *local_enr = disk_enr;
                                     return Ok(());
@@ -144,14 +144,11 @@ pub fn use_or_load_enr(
                                 local_enr.set_seq(new_seq_no, enr_key).map_err(|e| {
                                     anyhow!("Could not update ENR sequence number: {:?}", e)
                                 })?;
-                                debug_with_peers!(
-                                    seq = new_seq_no,
-                                    "ENR sequence number increased"
-                                );
+                                debug!(seq = new_seq_no, "ENR sequence number increased");
                             }
                         }
                         Err(e) => {
-                            warn_with_peers!(error = ?e,"ENR from file could not be decoded");
+                            warn!(error = ?e,"ENR from file could not be decoded");
                         }
                     }
                 }
@@ -359,10 +356,10 @@ pub fn save_enr_to_disk(dir: Option<&Path>, enr: &Enr) {
         .and_then(|mut f| f.write_all(enr.to_base64().as_bytes()))
     {
         Ok(_) => {
-            debug_with_peers!("ENR written to disk");
+            debug!("ENR written to disk");
         }
         Err(e) => {
-            warn_with_peers!(
+            warn!(
                 file = format!("{:?}{:?}",dir, ENR_FILENAME),
                 error = %e,
                 "Could not write ENR to file"

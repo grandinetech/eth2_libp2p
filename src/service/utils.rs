@@ -12,7 +12,6 @@ use libp2p::core::{multiaddr::Multiaddr, muxing::StreamMuxerBox, transport::Boxe
 use libp2p::identity::{secp256k1, Keypair};
 use libp2p::metrics::Registry;
 use libp2p::{core, noise, yamux, PeerId, Transport};
-use logging::{debug_with_peers, warn_with_peers};
 use ssz::SszReadDefault;
 use std::collections::HashSet;
 use std::fs::File;
@@ -20,6 +19,7 @@ use std::io::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::{debug, warn};
 use types::{
     config::Config as ChainConfig,
     phase0::{consts::FAR_FUTURE_EPOCH, primitives::ForkDigest},
@@ -131,15 +131,13 @@ pub fn load_private_key(config: &NetworkConfig) -> Keypair {
                         // First try to parse as hex string
                         let hex_content = hex_string.trim();
                         if let Ok(keypair) = keypair_from_hex(hex_content) {
-                            debug_with_peers!("Loaded network key from disk (hex format).");
+                            debug!("Loaded network key from disk (hex format).");
                             return keypair;
                         }
                     }
                 }
                 Err(_) => {
-                    debug_with_peers!(
-                        "Could not read network key file as string, trying binary format"
-                    )
+                    debug!("Could not read network key file as string, trying binary format")
                 }
             }
 
@@ -147,13 +145,13 @@ pub fn load_private_key(config: &NetworkConfig) -> Keypair {
             if let Ok(mut network_key_file) = File::open(network_key_f.clone()) {
                 let mut key_bytes: Vec<u8> = Vec::with_capacity(36);
                 match network_key_file.read_to_end(&mut key_bytes) {
-                    Err(_) => debug_with_peers!("Could not read network key file"),
+                    Err(_) => debug!("Could not read network key file"),
                     Ok(_) => {
                         // only accept secp256k1 keys for now
                         if let Ok(secret_key) = secp256k1::SecretKey::try_from_bytes(&mut key_bytes)
                         {
                             let kp: secp256k1::Keypair = secret_key.clone().into();
-                            debug_with_peers!(
+                            debug!(
                             "Loaded network key from disk (binary format), migrating to hex format."
                         );
 
@@ -162,14 +160,14 @@ pub fn load_private_key(config: &NetworkConfig) -> Keypair {
                             if let Err(e) = File::create(network_key_f.clone())
                                 .and_then(|mut f| f.write_all(hex_key.as_bytes()))
                             {
-                                debug_with_peers!("Failed to migrate key to hex format: {}", e);
+                                debug!("Failed to migrate key to hex format: {}", e);
                             } else {
-                                debug_with_peers!("Successfully migrated key to hex format.");
+                                debug!("Successfully migrated key to hex format.");
                             }
 
                             return kp.into();
                         } else {
-                            debug_with_peers!("Network key file is not a valid secp256k1 key");
+                            debug!("Network key file is not a valid secp256k1 key");
                         }
                     }
                 }
@@ -188,13 +186,12 @@ pub fn load_private_key(config: &NetworkConfig) -> Keypair {
         match File::create(network_key_f.clone()).and_then(|mut f| f.write_all(hex_key.as_bytes()))
         {
             Ok(_) => {
-                debug_with_peers!("New network key generated and written to disk");
+                debug!("New network key generated and written to disk");
             }
             Err(e) => {
-                warn_with_peers!(
+                warn!(
                     "Could not write node key to file: {:?}. error: {}",
-                    network_key_f,
-                    e
+                    network_key_f, e
                 );
             }
         }
@@ -269,7 +266,7 @@ pub fn load_or_build_metadata(
                         if let Some(custody_group_count) = meta_data.custody_group_count_mut() {
                             *custody_group_count = persisted_metadata.custody_group_count;
                         }
-                        debug_with_peers!("Loaded metadata from disk");
+                        debug!("Loaded metadata from disk");
                     }
                     Err(_) => match MetaDataV2::from_ssz_default(&metadata_ssz) {
                         Ok(persisted_metadata) => {
@@ -282,17 +279,17 @@ pub fn load_or_build_metadata(
                             {
                                 *meta_data.seq_number_mut() += 1;
                             }
-                            debug_with_peers!("Loaded metadata from disk");
+                            debug!("Loaded metadata from disk");
                         }
                         Err(_) => match MetaDataV1::from_ssz_default(&metadata_ssz) {
                             Ok(persisted_metadata) => {
                                 let persisted_metadata = MetaData::V1(persisted_metadata);
                                 // Increment seq number as the persisted metadata version is updated
                                 *meta_data.seq_number_mut() = persisted_metadata.seq_number() + 1;
-                                debug_with_peers!("Loaded metadata from disk");
+                                debug!("Loaded metadata from disk");
                             }
                             Err(e) => {
-                                debug_with_peers!(
+                                debug!(
                                     error = ?e,
                                     "Metadata from file could not be decoded"
                                 );
@@ -304,7 +301,7 @@ pub fn load_or_build_metadata(
         };
     }
 
-    debug_with_peers!(seq_num = meta_data.seq_number(), "Metadata sequence number");
+    debug!(seq_num = meta_data.seq_number(), "Metadata sequence number");
     save_metadata_to_disk(network_dir, meta_data.clone());
     meta_data
 }
@@ -359,7 +356,7 @@ pub(crate) fn create_whitelist_filter(
 /// Persist metadata to disk
 pub(crate) fn save_metadata_to_disk(dir: Option<&Path>, metadata: MetaData) {
     let Some(dir) = dir else {
-        debug_with_peers!("Skipping Metadata writing to disk");
+        debug!("Skipping Metadata writing to disk");
         return;
     };
 
@@ -374,10 +371,10 @@ pub(crate) fn save_metadata_to_disk(dir: Option<&Path>, metadata: MetaData) {
 
     match write_to_disk() {
         Ok(_) => {
-            debug_with_peers!("Metadata written to disk");
+            debug!("Metadata written to disk");
         }
         Err(e) => {
-            warn_with_peers!(
+            warn!(
                 file = format!("{:?}{:?}", dir, METADATA_FILENAME),
                 error = %e,
                 "Could not write metadata to disk"
