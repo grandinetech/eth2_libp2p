@@ -18,7 +18,7 @@ use libp2p::swarm::handler::{
 };
 use libp2p::swarm::{ConnectionId, Stream};
 use libp2p::PeerId;
-use logging::{debug_with_peers, exception, trace_with_peers};
+use logging::exception;
 use smallvec::SmallVec;
 use std::{
     collections::{hash_map::Entry, VecDeque},
@@ -29,6 +29,7 @@ use std::{
 };
 use tokio::time::{sleep, Sleep};
 use tokio_util::time::{delay_queue, DelayQueue};
+use tracing::{debug, trace};
 use types::preset::Preset;
 
 /// The number of times to retry an outbound upgrade in the case of IO errors.
@@ -222,7 +223,6 @@ impl<Id, P> RPCHandler<Id, P>
 where
     P: Preset,
 {
-    //#[tracing::instrument(level = "debug", skip_all, fields(peer_id = %peer_id, connection_id = %connection_id))]
     pub fn new(
         listen_protocol: SubstreamProtocol<RPCProtocol<P>, ()>,
         fork_context: Arc<ForkContext>,
@@ -255,7 +255,7 @@ where
     fn shutdown(&mut self, goodbye_reason: Option<(Id, GoodbyeReason)>) {
         if matches!(self.state, HandlerState::Active) {
             if !self.dial_queue.is_empty() {
-                debug_with_peers!(
+                debug!(
                     unsent_queued_requests = self.dial_queue.len(),
                     peer_id = %self.peer_id,
                     connection_id = %self.connection_id,
@@ -307,7 +307,7 @@ where
         let Some(inbound_info) = self.inbound_substreams.get_mut(&inbound_id) else {
             if !matches!(response, RpcResponse::StreamTermination(..)) {
                 // the stream is closed after sending the expected number of responses
-                trace_with_peers!(%response, id = ?inbound_id,
+                trace!(%response, id = ?inbound_id,
                     peer_id = %self.peer_id,
                     connection_id = %self.connection_id,
                     "Inbound stream has expired. Response not sent");
@@ -326,7 +326,7 @@ where
 
         if matches!(self.state, HandlerState::Deactivated) {
             // we no longer send responses after the handler is deactivated
-            debug_with_peers!(%response, id = ?inbound_id,
+            debug!(%response, id = ?inbound_id,
                     peer_id = %self.peer_id,
                     connection_id = %self.connection_id,
                     "Response not sent. Deactivated handler");
@@ -398,7 +398,7 @@ where
             match delay.as_mut().poll(cx) {
                 Poll::Ready(_) => {
                     self.state = HandlerState::Deactivated;
-                    debug_with_peers!(
+                    debug!(
                         peer_id = %self.peer_id,
                         connection_id = %self.connection_id,
                         "Shutdown timeout elapsed, Handler deactivated"
@@ -577,7 +577,7 @@ where
                                 }
                                 // Its useful to log when the request was completed.
                                 if matches!(info.protocol, Protocol::BlocksByRange) {
-                                    debug_with_peers!(
+                                    debug!(
                                         peer_id = %self.peer_id,
                                         connection_id = %self.connection_id,
                                         duration = Instant::now()
@@ -587,7 +587,7 @@ where
                                     );
                                 }
                                 if matches!(info.protocol, Protocol::BlobsByRange) {
-                                    debug_with_peers!(
+                                    debug!(
                                         peer_id = %self.peer_id,
                                         connection_id = %self.connection_id,
                                         duration = Instant::now()
@@ -617,7 +617,7 @@ where
                                 }));
 
                                 if matches!(info.protocol, Protocol::BlocksByRange) {
-                                    debug_with_peers!(
+                                    debug!(
                                         peer_id = %self.peer_id,
                                         connection_id = %self.connection_id,
                                         duration = info.request_start_time.elapsed().as_secs(),
@@ -625,7 +625,7 @@ where
                                     );
                                 }
                                 if matches!(info.protocol, Protocol::BlobsByRange) {
-                                    debug_with_peers!(
+                                    debug!(
                                         peer_id = %self.peer_id,
                                         connection_id = %self.connection_id,
                                         duration = info.request_start_time.elapsed().as_secs(),
@@ -852,7 +852,7 @@ where
                 && self.events_out.is_empty()
                 && self.dial_negotiated == 0
             {
-                debug_with_peers!(
+                debug!(
                     peer_id = %self.peer_id,
                     connection_id = %self.connection_id,
                     "Goodbye sent, Handler deactivated"

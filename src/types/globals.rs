@@ -6,11 +6,11 @@ use crate::types::{BackFillState, SyncState};
 use crate::{Client, Enr, EnrExt, GossipTopic, Multiaddr, NetworkConfig, PeerId};
 use eip_7594::{compute_subnets_from_custody_group, get_custody_groups};
 use helper_functions::misc::compute_subnet_for_data_column_sidecar;
-use logging::{debug_with_peers, error_with_peers};
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std_ext::ArcExt as _;
+use tracing::{debug, error};
 use types::config::Config as ChainConfig;
 use types::fulu::primitives::ColumnIndex;
 use types::phase0::primitives::SubnetId;
@@ -59,7 +59,7 @@ impl NetworkGlobals {
             Some(cgc) if cgc <= config.number_of_custody_groups => cgc,
             _ => {
                 if config.is_peerdas_scheduled() {
-                    error_with_peers!(
+                    error!(
                         info = "falling back to default custody requirement",
                         "custody_group_count from metadata is either invalid or not set. This is a bug!"
                     );
@@ -81,7 +81,7 @@ impl NetworkGlobals {
             sampling_subnets.extend(subnets);
         }
 
-        debug_with_peers!(
+        debug!(
             cgc = custody_group_count,
             ?sampling_subnets,
             "Starting node with custody params"
