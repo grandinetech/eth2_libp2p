@@ -376,7 +376,7 @@ where
             (),
         );
         let _rpc_span =
-            tracing::info_span!("rpc_handler", peer_id = %peer_id, connection_id = %connection_id)
+            tracing::debug_span!("rpc_handler", peer_id = %peer_id, connection_id = %connection_id)
                 .entered();
         let handler = RPCHandler::new(protocol, self.fork_context.clone(), peer_id, connection_id);
 
@@ -403,7 +403,7 @@ where
         );
 
         let _rpc_span =
-            tracing::info_span!("rpc_handler", peer_id = %peer_id, connection_id = %connection_id)
+            tracing::debug_span!("rpc_handler", peer_id = %peer_id, connection_id = %connection_id)
                 .entered();
         let handler = RPCHandler::new(protocol, self.fork_context.clone(), peer_id, connection_id);
 
