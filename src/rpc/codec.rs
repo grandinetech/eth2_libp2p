@@ -1148,7 +1148,8 @@ mod tests {
                 },
                 slot: misc::compute_start_slot_at_epoch::<P>(config.bellatrix_fork_epoch),
                 ..BellatrixBeaconBlock::default()
-            },
+            }
+            .into(),
             ..BellatrixSignedBeaconBlock::default()
         };
 
@@ -1176,7 +1177,8 @@ mod tests {
                 },
                 slot: misc::compute_start_slot_at_epoch::<P>(config.bellatrix_fork_epoch),
                 ..BellatrixBeaconBlock::default()
-            },
+            }
+            .into(),
             ..BellatrixSignedBeaconBlock::default()
         };
 
