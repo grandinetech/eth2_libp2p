@@ -13,7 +13,9 @@ use tracing_subscriber::EnvFilter;
 use types::{config::Config as ChainConfig, nonstandard::Phase, preset::Preset};
 
 use eth2_libp2p::rpc::config::InboundRateLimiterConfig;
+use libp2p::identity::secp256k1;
 use tempfile::Builder as TempBuilder;
+
 pub struct Libp2pInstance<P: Preset>(LibP2PService<P>);
 
 impl<P: Preset> std::ops::Deref for Libp2pInstance<P> {
@@ -92,6 +94,7 @@ pub async fn build_libp2p_instance<P: Preset>(
             executor,
             libp2p_context,
             custody_group_count,
+            secp256k1::Keypair::generate().into(),
         )
         .await
         .expect("should build libp2p instance")
