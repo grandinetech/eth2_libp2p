@@ -28,8 +28,7 @@ pub fn full_phase0_signed_beacon_block<P: Preset>() -> Phase0SignedBeaconBlock<P
                 ..Phase0BeaconBlockBody::default()
             },
             ..Phase0BeaconBlock::default()
-        }
-        .into(),
+        },
         signature: SignatureBytes::default(),
     }
 }
@@ -47,8 +46,7 @@ pub fn full_altair_signed_beacon_block<P: Preset>(config: &Config) -> AltairSign
             },
             slot: misc::compute_start_slot_at_epoch::<P>(config.altair_fork_epoch),
             ..AltairBeaconBlock::default()
-        }
-        .into(),
+        },
         signature: SignatureBytes::default(),
     }
 }

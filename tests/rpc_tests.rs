@@ -46,8 +46,7 @@ fn bellatrix_block_small<P: Preset>(config: &Config) -> BellatrixSignedBeaconBlo
             },
             slot: misc::compute_start_slot_at_epoch::<P>(config.bellatrix_fork_epoch),
             ..BellatrixBeaconBlock::default()
-        }
-        .into(),
+        },
         ..BellatrixSignedBeaconBlock::default()
     };
 
@@ -73,8 +72,7 @@ fn bellatrix_block_large<P: Preset>(config: &Config) -> BellatrixSignedBeaconBlo
             },
             slot: misc::compute_start_slot_at_epoch::<P>(config.bellatrix_fork_epoch),
             ..BellatrixBeaconBlock::default()
-        }
-        .into(),
+        },
         ..BellatrixSignedBeaconBlock::default()
     };
 
