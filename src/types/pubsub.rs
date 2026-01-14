@@ -35,6 +35,7 @@ use types::{
         },
         primitives::{ForkDigest, SubnetId},
     },
+    eip7805::{InclusionList, SignedInclusionList},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -69,6 +70,8 @@ pub enum PubsubMessage<P: Preset> {
     LightClientFinalityUpdate(Box<LightClientFinalityUpdate<P>>),
     /// Gossipsub message providing notification of a light client optimistic update.
     LightClientOptimisticUpdate(Box<LightClientOptimisticUpdate<P>>),
+    /// Gossipsub message providing notification of a signed inclusion list.
+    SignedInclusionList(Arc<SignedInclusionList>),
 }
 
 // Implements the `DataTransform` trait of gossipsub to employ snappy compression
@@ -170,7 +173,8 @@ impl<P: Preset> PubsubMessage<P> {
             PubsubMessage::LightClientFinalityUpdate(_) => GossipKind::LightClientFinalityUpdate,
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 GossipKind::LightClientOptimisticUpdate
-            }
+            },
+            PubsubMessage::SignedInclusionList(_) => GossipKind::SignedInclusionList,
         }
     }
 
@@ -506,6 +510,14 @@ impl<P: Preset> PubsubMessage<P> {
                             light_client_optimistic_update,
                         )))
                     }
+                    GossipKind::SignedInclusionList => {
+                        let signed_inclusion_list =
+                            SignedInclusionList::from_ssz_default(data)
+                                .map_err(|e| format!("{:?}", e))?;
+                        Ok(PubsubMessage::SignedInclusionList(Arc::new(
+                            signed_inclusion_list,
+                        )))
+                    }
                 }
             }
         }
@@ -533,6 +545,7 @@ impl<P: Preset> PubsubMessage<P> {
             PubsubMessage::BlsToExecutionChange(data) => data.to_ssz(),
             PubsubMessage::LightClientFinalityUpdate(data) => data.to_ssz(),
             PubsubMessage::LightClientOptimisticUpdate(data) => data.to_ssz(),
+            PubsubMessage::SignedInclusionList(data) => data.to_ssz(),
         }
     }
 }
@@ -602,6 +615,10 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
             PubsubMessage::LightClientOptimisticUpdate(_data) => {
                 write!(f, "Light CLient Optimistic Update")
             }
+            PubsubMessage::SignedInclusionList(_) => {
+                write!(f, "Signed Inclusion List")
+            },
+
         }
     }
 }

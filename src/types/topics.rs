@@ -34,6 +34,7 @@ pub const SYNC_COMMITTEE_PREFIX_TOPIC: &str = "sync_committee_";
 pub const BLS_TO_EXECUTION_CHANGE_TOPIC: &str = "bls_to_execution_change";
 pub const LIGHT_CLIENT_FINALITY_UPDATE: &str = "light_client_finality_update";
 pub const LIGHT_CLIENT_OPTIMISTIC_UPDATE: &str = "light_client_optimistic_update";
+pub const SIGNED_INCLUSION_LIST: &str = "inclusion_list";
 
 #[derive(Debug)]
 pub struct TopicConfig {
@@ -186,6 +187,8 @@ pub enum GossipKind {
     LightClientFinalityUpdate,
     /// Topic for publishing optimistic updates for light clients.
     LightClientOptimisticUpdate,
+    /// Topic for publishing inclusion list.
+    SignedInclusionList,
 }
 
 impl std::fmt::Display for GossipKind {
@@ -267,6 +270,7 @@ impl GossipTopic {
                 BLS_TO_EXECUTION_CHANGE_TOPIC => GossipKind::BlsToExecutionChange,
                 LIGHT_CLIENT_FINALITY_UPDATE => GossipKind::LightClientFinalityUpdate,
                 LIGHT_CLIENT_OPTIMISTIC_UPDATE => GossipKind::LightClientOptimisticUpdate,
+                SIGNED_INCLUSION_LIST => GossipKind::SignedInclusionList,
                 topic => match subnet_topic_index(topic) {
                     Some(kind) => kind,
                     None => return Err(format!("Unknown topic: {}", topic)),
@@ -334,6 +338,7 @@ impl std::fmt::Display for GossipTopic {
             GossipKind::BlsToExecutionChange => BLS_TO_EXECUTION_CHANGE_TOPIC.into(),
             GossipKind::LightClientFinalityUpdate => LIGHT_CLIENT_FINALITY_UPDATE.into(),
             GossipKind::LightClientOptimisticUpdate => LIGHT_CLIENT_OPTIMISTIC_UPDATE.into(),
+            GossipKind::SignedInclusionList => SIGNED_INCLUSION_LIST.into(),
         };
         write!(
             f,
@@ -406,6 +411,7 @@ mod tests {
                 VoluntaryExit,
                 ProposerSlashing,
                 AttesterSlashing,
+                SignedInclusionList,
             ]
             .iter()
             {
