@@ -30,8 +30,8 @@ use types::{
         DataColumnSidecar as FuluDataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock,
     },
     gloas::containers::{
-        DataColumnSidecar as GloasDataColumnSidecar, SignedBeaconBlock as GloasSignedBeaconBlock,
-        SignedExecutionPayloadBid,
+        DataColumnSidecar as GloasDataColumnSidecar, PayloadAttestationMessage,
+        SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
     },
     nonstandard::Phase,
     phase0::{
@@ -78,6 +78,8 @@ pub enum PubsubMessage<P: Preset> {
     LightClientOptimisticUpdate(Box<LightClientOptimisticUpdate<P>>),
     /// Gossipsub message providing notification of an execution payload bid.
     ExecutionPayloadBid(Arc<SignedExecutionPayloadBid<P>>),
+    /// Gossipsub message providing notification of a payload attestation message.
+    PayloadAttestationMessage(Arc<PayloadAttestationMessage>),
 }
 
 // Implements the `DataTransform` trait of gossipsub to employ snappy compression
@@ -181,6 +183,7 @@ impl<P: Preset> PubsubMessage<P> {
                 GossipKind::LightClientOptimisticUpdate
             }
             PubsubMessage::ExecutionPayloadBid(_) => GossipKind::ExecutionPayloadBid,
+            PubsubMessage::PayloadAttestationMessage(_) => GossipKind::PayloadAttestationMessage,
         }
     }
 
@@ -568,6 +571,32 @@ impl<P: Preset> PubsubMessage<P> {
                             )),
                         }
                     }
+                    GossipKind::PayloadAttestationMessage => {
+                        match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
+                            Some(Phase::Gloas) => {
+                                let payload_attestation = Arc::new(
+                                    PayloadAttestationMessage::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                );
+                                Ok(PubsubMessage::PayloadAttestationMessage(
+                                    payload_attestation,
+                                ))
+                            }
+                            Some(
+                                Phase::Phase0
+                                | Phase::Altair
+                                | Phase::Bellatrix
+                                | Phase::Capella
+                                | Phase::Deneb
+                                | Phase::Electra
+                                | Phase::Fulu,
+                            )
+                            | None => Err(format!(
+                                "payload_attestation_message topic invalid for given fork digest {:?}",
+                                gossip_topic.fork_digest
+                            )),
+                        }
+                    }
                 }
             }
         }
@@ -596,6 +625,7 @@ impl<P: Preset> PubsubMessage<P> {
             PubsubMessage::LightClientFinalityUpdate(data) => data.to_ssz(),
             PubsubMessage::LightClientOptimisticUpdate(data) => data.to_ssz(),
             PubsubMessage::ExecutionPayloadBid(data) => data.to_ssz(),
+            PubsubMessage::PayloadAttestationMessage(data) => data.to_ssz(),
         }
     }
 }
@@ -670,6 +700,13 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
                     f,
                     "Execution Payload Bid: slot: {}, parent_block_root: {:?}, builder_index: {}",
                     data.message.slot, data.message.parent_block_root, data.message.builder_index
+                )
+            }
+            PubsubMessage::PayloadAttestationMessage(data) => {
+                write!(
+                    f,
+                    "Payload Attestation: slot: {}, beacon_block_root: {:?}, validator_index: {}",
+                    data.data.slot, data.data.beacon_block_root, data.validator_index
                 )
             }
         }
