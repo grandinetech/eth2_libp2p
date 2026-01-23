@@ -36,6 +36,7 @@ pub const LIGHT_CLIENT_FINALITY_UPDATE: &str = "light_client_finality_update";
 pub const LIGHT_CLIENT_OPTIMISTIC_UPDATE: &str = "light_client_optimistic_update";
 pub const EXECUTION_PAYLOAD_BID_TOPIC: &str = "execution_payload_bid";
 pub const EXECUTION_PAYLOAD_TOPIC: &str = "execution_payload";
+pub const PAYLOAD_ATTESTATION_MESSAGE_TOPIC: &str = "payload_attestation_message";
 
 #[derive(Debug)]
 pub struct TopicConfig {
@@ -106,6 +107,7 @@ pub fn core_topics_to_subscribe(
     if current_phase >= Phase::Gloas {
         topics.push(GossipKind::ExecutionPayloadBid);
         topics.push(GossipKind::ExecutionPayload);
+        topics.push(GossipKind::PayloadAttestationMessage);
     }
 
     topics
@@ -134,7 +136,8 @@ pub fn is_fork_non_core_topic(topic: &GossipTopic, _phase: Phase) -> bool {
         | GossipKind::LightClientFinalityUpdate
         | GossipKind::LightClientOptimisticUpdate
         | GossipKind::ExecutionPayloadBid
-        | GossipKind::ExecutionPayload => false,
+        | GossipKind::ExecutionPayload
+        | GossipKind::PayloadAttestationMessage => false,
     }
 }
 
@@ -199,6 +202,8 @@ pub enum GossipKind {
     ExecutionPayloadBid,
     /// Topic for publishing execution payload envelopes.
     ExecutionPayload,
+    /// Topic for publishing payload attestation messages.
+    PayloadAttestationMessage,
 }
 
 impl std::fmt::Display for GossipKind {
@@ -282,6 +287,7 @@ impl GossipTopic {
                 LIGHT_CLIENT_OPTIMISTIC_UPDATE => GossipKind::LightClientOptimisticUpdate,
                 EXECUTION_PAYLOAD_BID_TOPIC => GossipKind::ExecutionPayloadBid,
                 EXECUTION_PAYLOAD_TOPIC => GossipKind::ExecutionPayload,
+                PAYLOAD_ATTESTATION_MESSAGE_TOPIC => GossipKind::PayloadAttestationMessage,
                 topic => match subnet_topic_index(topic) {
                     Some(kind) => kind,
                     None => return Err(format!("Unknown topic: {}", topic)),
@@ -351,6 +357,7 @@ impl std::fmt::Display for GossipTopic {
             GossipKind::LightClientOptimisticUpdate => LIGHT_CLIENT_OPTIMISTIC_UPDATE.into(),
             GossipKind::ExecutionPayloadBid => EXECUTION_PAYLOAD_BID_TOPIC.into(),
             GossipKind::ExecutionPayload => EXECUTION_PAYLOAD_TOPIC.into(),
+            GossipKind::PayloadAttestationMessage => PAYLOAD_ATTESTATION_MESSAGE_TOPIC.into(),
         };
         write!(
             f,
@@ -425,6 +432,7 @@ mod tests {
                 AttesterSlashing,
                 ExecutionPayloadBid,
                 ExecutionPayload,
+                PayloadAttestationMessage,
             ]
             .iter()
             {
@@ -523,6 +531,10 @@ mod tests {
         assert_eq!("attester_slashing", AttesterSlashing.as_ref());
         assert_eq!("execution_payload_bid", ExecutionPayloadBid.as_ref());
         assert_eq!("execution_payload", ExecutionPayload.as_ref());
+        assert_eq!(
+            "payload_attestation_message",
+            PayloadAttestationMessage.as_ref()
+        );
     }
 
     fn get_chain_config() -> ChainConfig {
@@ -607,6 +619,7 @@ mod tests {
             GossipKind::BlsToExecutionChange,
             GossipKind::ExecutionPayloadBid,
             GossipKind::ExecutionPayload,
+            GossipKind::PayloadAttestationMessage,
         ];
         for subnet in s {
             expected_topics.push(GossipKind::DataColumnSidecar(subnet));

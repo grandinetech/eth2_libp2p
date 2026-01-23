@@ -274,6 +274,7 @@ impl<P: Preset> Network<P> {
                 .bls_to_execution_change_timeout(half_epoch * 2)
                 .execution_payload_bid_timeout(slot_duration)
                 .execution_payload_timeout(slot_duration)
+                .payload_attestation_message_timeout(slot_duration)
                 .build()
         };
 
