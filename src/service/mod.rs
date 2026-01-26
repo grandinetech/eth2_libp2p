@@ -273,6 +273,7 @@ impl<P: Preset> Network<P> {
                 // .sync_committee_message_timeout(timeout) // Do not retry
                 .bls_to_execution_change_timeout(half_epoch * 2)
                 .payload_attestation_message_timeout(slot_duration)
+                .execution_payload_bid_timeout(slot_duration)
                 .build()
         };
 

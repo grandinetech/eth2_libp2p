@@ -35,6 +35,7 @@ pub const BLS_TO_EXECUTION_CHANGE_TOPIC: &str = "bls_to_execution_change";
 pub const LIGHT_CLIENT_FINALITY_UPDATE: &str = "light_client_finality_update";
 pub const LIGHT_CLIENT_OPTIMISTIC_UPDATE: &str = "light_client_optimistic_update";
 pub const PAYLOAD_ATTESTATION_MESSAGE_TOPIC: &str = "payload_attestation_message";
+pub const EXECUTION_PAYLOAD_BID_TOPIC: &str = "execution_payload_bid";
 
 #[derive(Debug)]
 pub struct TopicConfig {
@@ -104,6 +105,7 @@ pub fn core_topics_to_subscribe(
 
     if current_phase >= Phase::Gloas {
         topics.push(GossipKind::PayloadAttestationMessage);
+        topics.push(GossipKind::ExecutionPayloadBid);
     }
 
     topics
@@ -131,7 +133,8 @@ pub fn is_fork_non_core_topic(topic: &GossipTopic, _phase: Phase) -> bool {
         | GossipKind::BlsToExecutionChange
         | GossipKind::LightClientFinalityUpdate
         | GossipKind::LightClientOptimisticUpdate
-        | GossipKind::PayloadAttestationMessage => false,
+        | GossipKind::PayloadAttestationMessage
+        | GossipKind::ExecutionPayloadBid => false,
     }
 }
 
@@ -194,6 +197,8 @@ pub enum GossipKind {
     LightClientOptimisticUpdate,
     /// Topic for publishing payload attestation messages.
     PayloadAttestationMessage,
+    /// Topic for publishing execution payload bids.
+    ExecutionPayloadBid,
 }
 
 impl std::fmt::Display for GossipKind {
@@ -276,6 +281,7 @@ impl GossipTopic {
                 LIGHT_CLIENT_FINALITY_UPDATE => GossipKind::LightClientFinalityUpdate,
                 LIGHT_CLIENT_OPTIMISTIC_UPDATE => GossipKind::LightClientOptimisticUpdate,
                 PAYLOAD_ATTESTATION_MESSAGE_TOPIC => GossipKind::PayloadAttestationMessage,
+                EXECUTION_PAYLOAD_BID_TOPIC => GossipKind::ExecutionPayloadBid,
                 topic => match subnet_topic_index(topic) {
                     Some(kind) => kind,
                     None => return Err(format!("Unknown topic: {}", topic)),
@@ -344,6 +350,7 @@ impl std::fmt::Display for GossipTopic {
             GossipKind::LightClientFinalityUpdate => LIGHT_CLIENT_FINALITY_UPDATE.into(),
             GossipKind::LightClientOptimisticUpdate => LIGHT_CLIENT_OPTIMISTIC_UPDATE.into(),
             GossipKind::PayloadAttestationMessage => PAYLOAD_ATTESTATION_MESSAGE_TOPIC.into(),
+            GossipKind::ExecutionPayloadBid => EXECUTION_PAYLOAD_BID_TOPIC.into(),
         };
         write!(
             f,
