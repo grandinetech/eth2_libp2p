@@ -44,6 +44,8 @@ pub struct GossipCache {
     light_client_optimistic_update: Option<Duration>,
     /// Timeout for execution payload bids.
     execution_payload_bid: Option<Duration>,
+    /// Timeout for execution payload envelopes.
+    execution_payload: Option<Duration>,
 }
 
 #[derive(Default)]
@@ -75,6 +77,8 @@ pub struct GossipCacheBuilder {
     light_client_optimistic_update: Option<Duration>,
     /// Timeout for execution payload bids.
     execution_payload_bid: Option<Duration>,
+    /// Timeout for execution payload envelopes.
+    execution_payload: Option<Duration>,
 }
 
 #[allow(dead_code)]
@@ -157,6 +161,12 @@ impl GossipCacheBuilder {
         self
     }
 
+    /// Timeout for execution payload messages.
+    pub fn execution_payload_timeout(mut self, timeout: Duration) -> Self {
+        self.execution_payload = Some(timeout);
+        self
+    }
+
     pub fn build(self) -> GossipCache {
         let GossipCacheBuilder {
             default_timeout,
@@ -173,6 +183,7 @@ impl GossipCacheBuilder {
             light_client_finality_update,
             light_client_optimistic_update,
             execution_payload_bid,
+            execution_payload,
         } = self;
         GossipCache {
             expirations: DelayQueue::default(),
@@ -190,6 +201,7 @@ impl GossipCacheBuilder {
             light_client_finality_update: light_client_finality_update.or(default_timeout),
             light_client_optimistic_update: light_client_optimistic_update.or(default_timeout),
             execution_payload_bid: execution_payload_bid.or(default_timeout),
+            execution_payload: execution_payload.or(default_timeout),
         }
     }
 }
@@ -217,6 +229,7 @@ impl GossipCache {
             GossipKind::LightClientFinalityUpdate => self.light_client_finality_update,
             GossipKind::LightClientOptimisticUpdate => self.light_client_optimistic_update,
             GossipKind::ExecutionPayloadBid => self.execution_payload_bid,
+            GossipKind::ExecutionPayload => self.execution_payload,
         };
         let Some(expire_timeout) = expire_timeout else {
             return;
