@@ -31,7 +31,7 @@ use types::{
     gloas::containers::{
         DataColumnSidecar as GloasDataColumnSidecar, PayloadAttestationMessage,
         SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
-        SignedExecutionPayloadEnvelope,
+        SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
     nonstandard::Phase,
     phase0::{
@@ -82,6 +82,8 @@ pub enum PubsubMessage<P: Preset> {
     ExecutionPayloadBid(Arc<SignedExecutionPayloadBid>),
     /// Gossipsub message providing notification of an execution payload envelope.
     ExecutionPayload(Arc<SignedExecutionPayloadEnvelope<P>>),
+    /// Gossipsub message providing notification of a proposer preference.
+    ProposerPreference(Box<SignedProposerPreferences>),
 }
 
 // Implements the `DataTransform` trait of gossipsub to employ snappy compression
@@ -187,6 +189,7 @@ impl<P: Preset> PubsubMessage<P> {
             PubsubMessage::PayloadAttestationMessage(_) => GossipKind::PayloadAttestationMessage,
             PubsubMessage::ExecutionPayloadBid(_) => GossipKind::ExecutionPayloadBid,
             PubsubMessage::ExecutionPayload(_) => GossipKind::ExecutionPayload,
+            PubsubMessage::ProposerPreference(_) => GossipKind::ProposerPreferences,
         }
     }
 
@@ -624,6 +627,31 @@ impl<P: Preset> PubsubMessage<P> {
                             )),
                         }
                     }
+                    GossipKind::ProposerPreferences => {
+                        match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
+                            Some(Phase::Gloas) => {
+                                let signed_proposer_preferences =
+                                    SignedProposerPreferences::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?;
+                                Ok(PubsubMessage::ProposerPreference(Box::new(
+                                    signed_proposer_preferences,
+                                )))
+                            }
+                            Some(
+                                Phase::Phase0
+                                | Phase::Altair
+                                | Phase::Bellatrix
+                                | Phase::Capella
+                                | Phase::Deneb
+                                | Phase::Electra
+                                | Phase::Fulu,
+                            )
+                            | None => Err(format!(
+                                "proposer_preferences topic invalid for given fork digest {:?}",
+                                gossip_topic.fork_digest
+                            )),
+                        }
+                    }
                 }
             }
         }
@@ -654,6 +682,7 @@ impl<P: Preset> PubsubMessage<P> {
             PubsubMessage::PayloadAttestationMessage(data) => data.to_ssz(),
             PubsubMessage::ExecutionPayloadBid(data) => data.to_ssz(),
             PubsubMessage::ExecutionPayload(data) => data.to_ssz(),
+            PubsubMessage::ProposerPreference(data) => data.to_ssz(),
         }
     }
 }
@@ -742,6 +771,13 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
                     f,
                     "Execution Payload: slot: {}, beacon_block_root: {:?}",
                     data.message.slot, data.message.beacon_block_root
+                )
+            }
+            PubsubMessage::ProposerPreference(data) => {
+                write!(
+                    f,
+                    "Proposer Preference: slot: {}, validator_index: {}",
+                    data.message.proposal_slot, data.message.validator_index,
                 )
             }
         }

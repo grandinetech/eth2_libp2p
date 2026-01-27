@@ -50,6 +50,8 @@ pub struct GossipCache {
     execution_payload_bid: Option<Duration>,
     /// Timeout for execution payload envelopes.
     execution_payload: Option<Duration>,
+    /// Timeout for proposer preferences.
+    proposer_preferences: Option<Duration>,
 }
 
 #[derive(Default)]
@@ -87,6 +89,8 @@ pub struct GossipCacheBuilder {
     execution_payload_bid: Option<Duration>,
     /// Timeout for execution payload envelopes.
     execution_payload: Option<Duration>,
+    /// Timeout for proposer preferences.
+    proposer_preferences: Option<Duration>,
 }
 
 #[allow(dead_code)]
@@ -181,6 +185,12 @@ impl GossipCacheBuilder {
         self
     }
 
+    /// Timeout for proposer preferences messages.
+    pub fn proposer_preferences_timeout(mut self, timeout: Duration) -> Self {
+        self.proposer_preferences = Some(timeout);
+        self
+    }
+
     pub fn build(self) -> GossipCache {
         let GossipCacheBuilder {
             default_timeout,
@@ -200,6 +210,7 @@ impl GossipCacheBuilder {
             payload_attestation_message,
             execution_payload_bid,
             execution_payload,
+            proposer_preferences,
         } = self;
         GossipCache {
             expirations: DelayQueue::default(),
@@ -220,6 +231,7 @@ impl GossipCacheBuilder {
             payload_attestation_message: payload_attestation_message.or(default_timeout),
             execution_payload_bid: execution_payload_bid.or(default_timeout),
             execution_payload: execution_payload.or(default_timeout),
+            proposer_preferences: proposer_preferences.or(default_timeout),
         }
     }
 }
@@ -250,6 +262,7 @@ impl GossipCache {
             GossipKind::PayloadAttestationMessage => self.payload_attestation_message,
             GossipKind::ExecutionPayloadBid => self.execution_payload_bid,
             GossipKind::ExecutionPayload => self.execution_payload,
+            GossipKind::ProposerPreferences => self.proposer_preferences,
         };
         let Some(expire_timeout) = expire_timeout else {
             return;
