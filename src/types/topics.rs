@@ -37,6 +37,7 @@ pub const LIGHT_CLIENT_OPTIMISTIC_UPDATE: &str = "light_client_optimistic_update
 pub const EXECUTION_PAYLOAD_BID_TOPIC: &str = "execution_payload_bid";
 pub const EXECUTION_PAYLOAD_TOPIC: &str = "execution_payload";
 pub const PAYLOAD_ATTESTATION_MESSAGE_TOPIC: &str = "payload_attestation_message";
+pub const PROPOSER_PREFERENCES_TOPIC: &str = "proposer_preferences";
 
 #[derive(Debug)]
 pub struct TopicConfig {
@@ -108,6 +109,7 @@ pub fn core_topics_to_subscribe(
         topics.push(GossipKind::ExecutionPayloadBid);
         topics.push(GossipKind::ExecutionPayload);
         topics.push(GossipKind::PayloadAttestationMessage);
+        topics.push(GossipKind::ProposerPreferences);
     }
 
     topics
@@ -138,6 +140,7 @@ pub fn is_fork_non_core_topic(topic: &GossipTopic, _phase: Phase) -> bool {
         | GossipKind::ExecutionPayloadBid
         | GossipKind::ExecutionPayload
         | GossipKind::PayloadAttestationMessage => false,
+        GossipKind::ProposerPreferences => false,
     }
 }
 
@@ -204,6 +207,8 @@ pub enum GossipKind {
     ExecutionPayload,
     /// Topic for publishing payload attestation messages.
     PayloadAttestationMessage,
+    /// Topic for publishing proposer preferences.
+    ProposerPreferences,
 }
 
 impl std::fmt::Display for GossipKind {
@@ -288,6 +293,7 @@ impl GossipTopic {
                 EXECUTION_PAYLOAD_BID_TOPIC => GossipKind::ExecutionPayloadBid,
                 EXECUTION_PAYLOAD_TOPIC => GossipKind::ExecutionPayload,
                 PAYLOAD_ATTESTATION_MESSAGE_TOPIC => GossipKind::PayloadAttestationMessage,
+                PROPOSER_PREFERENCES_TOPIC => GossipKind::ProposerPreferences,
                 topic => match subnet_topic_index(topic) {
                     Some(kind) => kind,
                     None => return Err(format!("Unknown topic: {}", topic)),
@@ -358,6 +364,7 @@ impl std::fmt::Display for GossipTopic {
             GossipKind::ExecutionPayloadBid => EXECUTION_PAYLOAD_BID_TOPIC.into(),
             GossipKind::ExecutionPayload => EXECUTION_PAYLOAD_TOPIC.into(),
             GossipKind::PayloadAttestationMessage => PAYLOAD_ATTESTATION_MESSAGE_TOPIC.into(),
+            GossipKind::ProposerPreferences => PROPOSER_PREFERENCES_TOPIC.into(),
         };
         write!(
             f,
@@ -433,6 +440,7 @@ mod tests {
                 ExecutionPayloadBid,
                 ExecutionPayload,
                 PayloadAttestationMessage,
+                ProposerPreferences,
             ]
             .iter()
             {
@@ -535,6 +543,7 @@ mod tests {
             "payload_attestation_message",
             PayloadAttestationMessage.as_ref()
         );
+        assert_eq!("proposer_preferences", ProposerPreferences.as_ref());
     }
 
     fn get_chain_config() -> ChainConfig {
@@ -620,6 +629,7 @@ mod tests {
             GossipKind::ExecutionPayloadBid,
             GossipKind::ExecutionPayload,
             GossipKind::PayloadAttestationMessage,
+            GossipKind::ProposerPreferences,
         ];
         for subnet in s {
             expected_topics.push(GossipKind::DataColumnSidecar(subnet));
