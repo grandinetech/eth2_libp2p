@@ -269,14 +269,12 @@ impl PeerDB {
             .filter(move |(_, info)| {
                 info.is_connected()
                     && match info.sync_status() {
-                        SyncStatus::Synced { info } => info.has_slot(
-                            misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1))
-                                .saturating_sub(1),
-                        ),
-                        SyncStatus::Advanced { info } => info.has_slot(
-                            misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1))
-                                .saturating_sub(1),
-                        ),
+                        SyncStatus::Synced { info } => {
+                            info.has_slot(misc::compute_start_slot_at_epoch::<P>(epoch))
+                        }
+                        SyncStatus::Advanced { info } => {
+                            info.has_slot(misc::compute_start_slot_at_epoch::<P>(epoch))
+                        }
                         SyncStatus::IrrelevantPeer
                         | SyncStatus::Behind { .. }
                         | SyncStatus::Unknown => false,
@@ -342,11 +340,7 @@ impl PeerDB {
             info.is_connected()
                 && match info.sync_status() {
                     SyncStatus::Synced { info } | SyncStatus::Advanced { info } => {
-                        let end_slot =
-                            misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1))
-                                .saturating_sub(1);
-
-                        info.has_slot(end_slot)
+                        info.has_slot(misc::compute_start_slot_at_epoch::<P>(epoch))
                     }
                     SyncStatus::IrrelevantPeer
                     | SyncStatus::Behind { .. }
