@@ -7,11 +7,10 @@ use crate::types::{
 use crate::{GossipTopic, NetworkConfig};
 use anyhow::{Result, anyhow};
 use futures::future::Either;
-use gossipsub;
 use libp2p::core::{multiaddr::Multiaddr, muxing::StreamMuxerBox, transport::Boxed};
 use libp2p::identity::{Keypair, secp256k1};
 use libp2p::metrics::Registry;
-use libp2p::{PeerId, Transport, core, noise, yamux};
+use libp2p::{PeerId, Transport, core, gossipsub, noise, yamux};
 use ssz::SszReadDefault;
 use std::collections::HashSet;
 use std::fs::File;

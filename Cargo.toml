@@ -8,9 +8,6 @@ authors = [
 edition = { workspace = true }
 autotests = false
 
-[features]
-libp2p-websocket = []
-
 [dependencies]
 alloy-rlp = { workspace = true }
 anyhow = { workspace = true }
@@ -24,7 +21,6 @@ either = { workspace = true }
 enum-iterator = { workspace = true }
 fnv = { workspace = true }
 futures = { workspace = true }
-gossipsub = { workspace = true }
 grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 hex = { workspace = true }

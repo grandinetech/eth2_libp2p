@@ -6,7 +6,7 @@ use crate::peer_manager::config::DEFAULT_TARGET_PEERS;
 use crate::rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig};
 use crate::types::{ForkContext, GossipKind};
 use crate::{Enr, PeerIdSerialized};
-use libp2p::Multiaddr;
+use libp2p::{Multiaddr, gossipsub};
 use local_ip_address::local_ipv6;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

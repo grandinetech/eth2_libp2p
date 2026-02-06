@@ -24,11 +24,11 @@ use crate::{Eth2Enr, task_executor};
 use anyhow::{Error, Result, anyhow};
 use api_types::{AppRequestId, Response};
 use futures::stream::StreamExt;
-use gossipsub::{
-    IdentTopic as Topic, MessageAcceptance, MessageAuthenticity, MessageId, PublishError,
+use gossipsub_scoring_parameters::{PeerScoreSettings, peer_gossip_thresholds};
+use libp2p::gossipsub::{
+    self, IdentTopic as Topic, MessageAcceptance, MessageAuthenticity, MessageId, PublishError,
     TopicScoreParams,
 };
-use gossipsub_scoring_parameters::{PeerScoreSettings, peer_gossip_thresholds};
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::{self, Multiaddr, Protocol as MProtocol};
 use libp2p::swarm::behaviour::toggle::Toggle;
@@ -1823,9 +1823,9 @@ impl<P: Preset> Network<P> {
 
     fn inject_upnp_event(&mut self, event: libp2p::upnp::Event) {
         match event {
-            libp2p::upnp::Event::NewExternalAddr(addr) => {
-                info!(%addr, "UPnP route established");
-                let mut iter = addr.iter();
+            libp2p::upnp::Event::NewExternalAddr { external_addr, .. } => {
+                info!(%external_addr, "UPnP route established");
+                let mut iter = external_addr.iter();
                 let is_ip6 = {
                     let addr = iter.next();
                     matches!(addr, Some(MProtocol::Ip6(_)))
@@ -1840,7 +1840,7 @@ impl<P: Preset> Network<P> {
                             }
                         }
                         _ => {
-                            trace!(%addr, "UPnP address mapped multiaddr from unknown transport");
+                            trace!(%external_addr, "UPnP address mapped multiaddr from unknown transport");
                         }
                     },
                     Some(multiaddr::Protocol::Tcp(tcp_port)) => {
@@ -1849,11 +1849,11 @@ impl<P: Preset> Network<P> {
                         }
                     }
                     _ => {
-                        trace!(%addr, "UPnP address mapped multiaddr from unknown transport");
+                        trace!(%external_addr, "UPnP address mapped multiaddr from unknown transport");
                     }
                 }
             }
-            libp2p::upnp::Event::ExpiredExternalAddr(_) => {}
+            libp2p::upnp::Event::ExpiredExternalAddr { .. } => {}
             libp2p::upnp::Event::GatewayNotFound => {
                 info!("UPnP not available");
             }

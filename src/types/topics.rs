@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use gossipsub::{IdentTopic as Topic, TopicHash};
+use libp2p::gossipsub::{IdentTopic as Topic, TopicHash};
 use serde::{Deserialize, Serialize};
 use strum::AsRefStr;
 use typenum::Unsigned;
