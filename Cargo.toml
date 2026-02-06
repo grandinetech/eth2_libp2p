@@ -54,8 +54,7 @@ types = { workspace = true }
 unsigned-varint = { workspace = true }
 
 [dev-dependencies]
-quickcheck = { workspace = true }
-quickcheck_macros = { workspace = true }
+proptest = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
