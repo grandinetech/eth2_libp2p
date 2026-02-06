@@ -6,6 +6,10 @@ authors = [
     'Sigma Prime <contact@sigmaprime.io>',
 ]
 edition = { workspace = true }
+autotests = false
+
+[features]
+libp2p-websocket = []
 
 [dependencies]
 alloy-rlp = { workspace = true }
@@ -57,5 +61,6 @@ unsigned-varint = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 
-[features]
-libp2p-websocket = []
+[[test]]
+name = "eth2_libp2p_tests"
+path = "tests/main.rs"

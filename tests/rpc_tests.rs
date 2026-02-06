@@ -1,7 +1,13 @@
 #![cfg(test)]
-use common::{Protocol, build_tracing_subscriber};
-use eth2_libp2p::rpc::{RequestType, methods::*};
-use eth2_libp2p::{NetworkEvent, ReportSource, Response, service::api_types::AppRequestId};
+
+use crate::common;
+use crate::common::{Protocol, build_tracing_subscriber};
+use crate::factory;
+use eth2_libp2p::{
+    NetworkEvent, ReportSource, Response,
+    rpc::{RequestType, methods::*},
+    service::api_types::AppRequestId,
+};
 use helper_functions::misc;
 use ssz::{ByteList, ContiguousList, DynamicList, SszRead as _, SszReadDefault, SszWrite};
 use std::sync::Arc;
@@ -29,9 +35,6 @@ use types::{
     },
     preset::{Mainnet, Preset},
 };
-
-mod common;
-mod factory;
 
 /// Bellatrix block with length < max_rpc_size.
 fn bellatrix_block_small<P: Preset>(config: &Config) -> BellatrixSignedBeaconBlock<P> {
