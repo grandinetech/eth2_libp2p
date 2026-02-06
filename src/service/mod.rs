@@ -245,7 +245,7 @@ impl<P: Preset> Network<P> {
             config.network_load,
             ctx.fork_context.clone(),
             gossipsub_config_params,
-            chain_config.slot_duration_ms.as_secs(),
+            chain_config.slot_duration_ms,
             chain_config
                 .preset_base
                 .phase0_preset()
@@ -257,13 +257,12 @@ impl<P: Preset> Network<P> {
         let score_settings = PeerScoreSettings::new(&chain_config, gs_config.mesh_n());
 
         let gossip_cache = {
-            let slot_duration = chain_config.slot_duration_ms;
-            let half_epoch = std::time::Duration::from_secs(
-                chain_config.slot_duration_ms.as_secs() * P::SlotsPerEpoch::U64 / 2,
+            let half_epoch = std::time::Duration::from_millis(
+                (chain_config.slot_duration_ms.as_millis() as u64) * P::SlotsPerEpoch::U64 / 2,
             );
 
             GossipCache::builder()
-                .beacon_block_timeout(slot_duration)
+                .beacon_block_timeout(chain_config.slot_duration_ms)
                 .aggregates_timeout(half_epoch)
                 .attestation_timeout(half_epoch)
                 .voluntary_exit_timeout(half_epoch * 2)
@@ -272,7 +271,7 @@ impl<P: Preset> Network<P> {
                 // .signed_contribution_and_proof_timeout(timeout) // Do not retry
                 // .sync_committee_message_timeout(timeout) // Do not retry
                 .bls_to_execution_change_timeout(half_epoch * 2)
-                .execution_payload_bid_timeout(slot_duration)
+                .execution_payload_bid_timeout(chain_config.slot_duration_ms)
                 .build()
         };
 
