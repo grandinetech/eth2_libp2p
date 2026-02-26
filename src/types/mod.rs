@@ -1,6 +1,7 @@
 mod enr_fork_id;
 mod fork_context;
 mod globals;
+mod partial;
 mod pubsub;
 mod subnet;
 mod sync_state;
@@ -17,7 +18,9 @@ pub type Enr = discv5::enr::Enr<discv5::enr::CombinedKey>;
 pub use enr_fork_id::EnrForkId;
 pub use fork_context::ForkContext;
 pub use globals::NetworkGlobals;
-pub use pubsub::{PubsubMessage, SnappyTransform};
+pub use partial::HeaderSentSet;
+pub use partial::OutgoingPartialColumn;
+pub use pubsub::{PubsubMessage, SnappyTransform, decode_partial};
 pub use subnet::{Subnet, SubnetDiscovery};
 pub use sync_state::{BackFillState, SyncState};
 pub use topics::{

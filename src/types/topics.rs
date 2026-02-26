@@ -14,7 +14,7 @@ use types::{
     },
 };
 
-use crate::Subnet;
+use crate::{NetworkConfig, Subnet};
 
 /// The gossipsub topic names.
 // These constants form a topic name of the form /TOPIC_PREFIX/TOPIC/ENCODING_POSTFIX
@@ -194,6 +194,15 @@ pub enum GossipKind {
     LightClientOptimisticUpdate,
     /// Topic for publishing execution payload bids.
     ExecutionPayloadBid,
+}
+
+impl GossipKind {
+    pub fn use_partial_messages(&self, config: &NetworkConfig) -> bool {
+        match self {
+            GossipKind::DataColumnSidecar(_) => config.enable_partial_columns,
+            _ => false,
+        }
+    }
 }
 
 impl std::fmt::Display for GossipKind {

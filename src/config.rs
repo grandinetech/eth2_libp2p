@@ -146,6 +146,9 @@ pub struct Config {
 
     /// Libp2p Private key file.
     pub libp2p_private_key_file: Option<PathBuf>,
+
+    /// Whether to enable partial data column support.
+    pub enable_partial_columns: bool,
 }
 
 impl Config {
@@ -372,6 +375,7 @@ impl Default for Config {
             inbound_rate_limiter_config: None,
             idontwant_message_size_threshold: DEFAULT_IDONTWANT_MESSAGE_SIZE_THRESHOLD,
             libp2p_private_key_file: None,
+            enable_partial_columns: false,
         }
     }
 }

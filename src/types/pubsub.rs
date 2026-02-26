@@ -1,10 +1,9 @@
 //! Handles the encoding and decoding of pubsub messages.
 
-use crate::TopicHash;
 use crate::types::{ForkContext, GossipEncoding, GossipKind, GossipTopic};
-use libp2p::gossipsub;
+use gossipsub::TopicHash;
 use snap::raw::{Decoder, Encoder, decompress_len};
-use ssz::{SszReadDefault, SszWrite as _, WriteError};
+use ssz::{H256, SszReadDefault, SszWrite as _, WriteError};
 use std::boxed::Box;
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
@@ -27,13 +26,14 @@ use types::{
         SignedBeaconBlock as ElectraBeaconBlock,
     },
     fulu::containers::{
-        DataColumnSidecar as FuluDataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock,
+        DataColumnSidecar as FuluDataColumnSidecar, PartialDataColumnSidecar,
+        SignedBeaconBlock as FuluSignedBeaconBlock,
     },
     gloas::containers::{
         DataColumnSidecar as GloasDataColumnSidecar, SignedBeaconBlock as GloasSignedBeaconBlock,
         SignedExecutionPayloadBid,
     },
-    nonstandard::Phase,
+    nonstandard::{PartialDataColumn, Phase},
     phase0::{
         containers::{
             Attestation as Phase0Attestation, AttesterSlashing as Phase0AttesterSlashing,
@@ -597,6 +597,35 @@ impl<P: Preset> PubsubMessage<P> {
             PubsubMessage::LightClientOptimisticUpdate(data) => data.to_ssz(),
             PubsubMessage::ExecutionPayloadBid(data) => data.to_ssz(),
         }
+    }
+}
+
+/// Decodes incoming partial data column sidecar from gossipsub partial protocol.
+/// Note: Currenly, data columns are the only supported partial messages. In future this could
+/// return an enum.
+pub fn decode_partial<P: Preset>(
+    topic: &GossipTopic,
+    group: &[u8],
+    data: &[u8],
+) -> Result<PartialDataColumn<P>, String> {
+    match topic.kind() {
+        GossipKind::DataColumnSidecar(id) => {
+            if group.first() != Some(&0) {
+                return Err(format!("Unknown data column format: {:?}", group.first()));
+            }
+            let block_root = H256::from_ssz_default(&group[1..])
+                .map_err(|e| format!("Error decoding group: {:?}", e))?;
+            let sidecar = PartialDataColumnSidecar::from_ssz_default(data)
+                .map_err(|e| format!("Error decoding sidecar: {:?}", e))?;
+            let data_column = PartialDataColumn {
+                block_root,
+                // Partial messages are spec'd under the assumption that there is one column per subnet.
+                index: *id,
+                sidecar,
+            };
+            Ok(data_column)
+        }
+        other => Err(format!("Partial message unsupported for topic: {other}")),
     }
 }
 

@@ -2,8 +2,8 @@
 name = 'eth2_libp2p'
 version = '0.2.0'
 authors = [
-    'Grandine Team <info@grandine.io>',
-    'Sigma Prime <contact@sigmaprime.io>',
+  'Grandine Team <info@grandine.io>',
+  'Sigma Prime <contact@sigmaprime.io>',
 ]
 edition = { workspace = true }
 autotests = false
@@ -21,6 +21,7 @@ either = { workspace = true }
 enum-iterator = { workspace = true }
 fnv = { workspace = true }
 futures = { workspace = true }
+gossipsub = { workspace = true }
 grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 hex = { workspace = true }

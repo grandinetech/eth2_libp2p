@@ -14,20 +14,22 @@ use crate::rpc::{
     GoodbyeReason, HandlerErr, InboundRequestId, Protocol, RPC, RPCError, RPCMessage, RPCReceived,
     RequestType, ResponseTermination, RpcResponse, RpcSuccessResponse,
 };
+use crate::service::partial_column_header_tracker::PartialColumnHeaderTracker;
 use crate::types::{
-    EnrForkId, ForkContext, GossipEncoding, GossipKind, GossipTopic, SnappyTransform, Subnet,
-    SubnetDiscovery, all_topics_at_fork, core_topics_to_subscribe, is_fork_non_core_topic,
-    subnet_from_topic_hash,
+    EnrForkId, ForkContext, GossipEncoding, GossipKind, GossipTopic, OutgoingPartialColumn,
+    SnappyTransform, Subnet, SubnetDiscovery, all_topics_at_fork, core_topics_to_subscribe,
+    is_fork_non_core_topic, subnet_from_topic_hash,
 };
-use crate::{Enr, NetworkGlobals, PubsubMessage, TopicHash, metrics};
+use crate::{Enr, NetworkGlobals, PubsubMessage, TopicHash, decode_partial, metrics};
 use crate::{Eth2Enr, task_executor};
 use anyhow::{Error, Result, anyhow};
 use api_types::{AppRequestId, Response};
 use futures::stream::StreamExt;
 use gossipsub_scoring_parameters::{PeerScoreSettings, peer_gossip_thresholds};
+use helper_functions::misc;
 use libp2p::gossipsub::{
-    self, IdentTopic as Topic, MessageAcceptance, MessageAuthenticity, MessageId, PublishError,
-    TopicScoreParams,
+    self, Event, IdentTopic as Topic, MessageAcceptance, MessageAuthenticity, MessageId,
+    PublishError, TopicScoreParams,
 };
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::{self, Multiaddr, Protocol as MProtocol};
@@ -48,8 +50,9 @@ use typenum::Unsigned as _;
 
 use types::{
     altair::consts::SyncCommitteeSubnetCount,
+    combined::PartialDataColumnHeader,
     config::Config as ChainConfig,
-    nonstandard::Phase,
+    nonstandard::{PartialDataColumn, Phase},
     phase0::{
         consts::AttestationSubnetCount,
         primitives::{ForkDigest, Slot},
@@ -61,6 +64,7 @@ use utils::{Context as ServiceContext, build_transport, strip_peer_id};
 pub mod api_types;
 mod gossip_cache;
 pub mod gossipsub_scoring_parameters;
+mod partial_column_header_tracker;
 pub mod utils;
 
 const MAX_IDENTIFY_ADDRESSES: usize = 10;
@@ -108,6 +112,15 @@ pub enum NetworkEvent<P: Preset> {
         topic: TopicHash,
         /// The message itself.
         message: PubsubMessage<P>,
+    },
+    /// A partial data column sidecar received via gossipsub partial protocol.
+    PartialDataColumnSidecar {
+        /// The peer from which we received this message.
+        source: PeerId,
+        /// The partial column data.
+        column: PartialDataColumn<P>,
+        /// The topic that this message was sent on.
+        topic: GossipTopic,
     },
     /// Inform the network to send a Status to this peer.
     StatusPeer(PeerId),
@@ -172,6 +185,7 @@ pub struct Network<P: Preset> {
     /// The interval for updating gossipsub scores
     update_gossipsub_scores: tokio::time::Interval,
     gossip_cache: GossipCache,
+    partial_column_header_tracker: PartialColumnHeaderTracker,
     /// This node's PeerId.
     pub local_peer_id: PeerId,
 }
@@ -537,6 +551,7 @@ impl<P: Preset> Network<P> {
             score_settings,
             update_gossipsub_scores,
             gossip_cache,
+            partial_column_header_tracker: PartialColumnHeaderTracker::new(),
             local_peer_id,
         };
 
@@ -842,9 +857,18 @@ impl<P: Preset> Network<P> {
             .write()
             .insert(topic.clone());
 
+        let partial = topic
+            .kind()
+            .use_partial_messages(self.network_globals.network_config.as_ref());
         let topic: Topic = topic.into();
 
-        match self.gossipsub_mut().subscribe(&topic) {
+        let subscribe_result = if partial {
+            self.gossipsub_mut().subscribe_partial(&topic, true)
+        } else {
+            self.gossipsub_mut().subscribe(&topic)
+        };
+
+        match subscribe_result {
             Err(e) => {
                 warn!(%topic, error = ?e, "Failed to subscribe to topic");
                 false
@@ -897,6 +921,16 @@ impl<P: Preset> Network<P> {
                             "Attempted to publish duplicate message"
                         );
                     }
+                    PublishError::NoPeersSubscribedToTopic
+                        if topic
+                            .kind()
+                            .use_partial_messages(self.network_globals.network_config.as_ref()) =>
+                    {
+                        debug!(
+                            kind = %topic.kind(),
+                            "No peers supporting full messages"
+                        );
+                    }
                     ref e => {
                         warn!(
                             error = ?e,
@@ -933,6 +967,68 @@ impl<P: Preset> Network<P> {
         }
     }
 
+    /// Publishes partial data column sidecars to the gossipsub network.
+    pub fn publish_partial(
+        &mut self,
+        columns: Vec<Arc<PartialDataColumn<P>>>,
+        header: Arc<PartialDataColumnHeader<P>>,
+    ) {
+        if !self.network_globals.network_config.enable_partial_columns {
+            return;
+        }
+
+        debug!(
+            count = columns.len(),
+            "Sending partial data column sidecars"
+        );
+
+        for column in columns {
+            let subnet = misc::compute_subnet_for_data_column_sidecar(
+                self.fork_context.chain_config(),
+                column.index,
+            );
+            let topic = GossipTopic::new(
+                GossipKind::DataColumnSidecar(subnet),
+                GossipEncoding::default(),
+                self.enr_fork_id.fork_digest,
+            );
+            let header_sent_set = self
+                .partial_column_header_tracker
+                .get_for_block(column.block_root);
+            let partial_message = OutgoingPartialColumn::new(column, &header, header_sent_set);
+            let publish_topic: Topic = topic.clone().into();
+
+            if let Err(e) = self
+                .gossipsub_mut()
+                .publish_partial(publish_topic, partial_message)
+            {
+                match e {
+                    PublishError::NoPeersSubscribedToTopic => {
+                        debug!(
+                            kind = %topic.kind(),
+                            "No peers supporting partial messages"
+                        );
+                    }
+                    ref e => {
+                        warn!(
+                            error = ?e,
+                            kind = %topic.kind(),
+                            "Could not publish partial message"
+                        );
+                    }
+                }
+
+                // add to metrics
+                if let Some(v) = crate::common::metrics::get_int_gauge(
+                    &metrics::FAILED_PUBLISHES_PER_MAIN_TOPIC,
+                    &[&format!("{:?}", topic.kind())],
+                ) {
+                    v.inc()
+                };
+            }
+        }
+    }
+
     /// Informs the gossipsub about the result of a message validation.
     /// If the message is valid it will get propagated by gossipsub.
     pub fn report_message_validation_result(
@@ -965,6 +1061,16 @@ impl<P: Preset> Network<P> {
             propagation_source,
             validation_result,
         );
+    }
+
+    /// Informs the gossipsub about the failure of a partial message validation.
+    pub fn report_partial_message_validation_failure(
+        &mut self,
+        propagation_source: PeerId,
+        topic: GossipTopic,
+    ) {
+        self.gossipsub_mut()
+            .report_invalid_partial(propagation_source, &TopicHash::from(Topic::from(topic)));
     }
 
     /// Updates the current gossipsub scoring parameters based on the validator count and current
@@ -1344,6 +1450,53 @@ impl<P: Preset> Network<P> {
                             topic: gs_msg.topic,
                             message: msg,
                         });
+                    }
+                }
+            }
+            Event::Partial {
+                topic_hash,
+                peer_id,
+                group_id,
+                message,
+                ..
+            } => {
+                let topic = GossipTopic::decode(topic_hash.as_str())
+                    .inspect_err(|error| {
+                        debug!(
+                            topic = ?topic_hash,
+                            error,
+                            "Could not decode gossipsub partial message topic"
+                        );
+                    })
+                    .ok()?;
+
+                if let Some(message) = message {
+                    match decode_partial::<P>(&topic, &group_id, &message) {
+                        Err(error) => {
+                            debug!(
+                                topic = ?topic_hash,
+                                error,
+                                "Could not decode gossipsub partial message"
+                            );
+                            //reject the message
+                            self.gossipsub_mut()
+                                .report_invalid_partial(peer_id, &topic_hash);
+                        }
+                        Ok(column) => {
+                            debug!(
+                                block_root = %column.block_root,
+                                index = column.index,
+                                %peer_id,
+                                cells_present = ?column.sidecar.cells_present_bitmap,
+                                "Decoded partial message"
+                            );
+                            // Notify the network
+                            return Some(NetworkEvent::PartialDataColumnSidecar {
+                                source: peer_id,
+                                column,
+                                topic,
+                            });
+                        }
                     }
                 }
             }
