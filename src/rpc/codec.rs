@@ -512,6 +512,9 @@ fn handle_error<T>(
                 Ok(None)
             }
         }
+        // All snappy errors from the snap crate bubble up as `Other` kind errors
+        // that imply invalid response
+        ErrorKind::Other => Err(RPCError::InvalidData(err.to_string())),
         _ => Err(RPCError::from(err)),
     }
 }
@@ -1111,6 +1114,7 @@ mod tests {
         types::{EnrAttestationBitfield, ForkContext},
     };
     use anyhow::Result;
+    use enum_iterator::Sequence;
     use snap::write::FrameEncoder;
     use ssz::{ByteList, DynamicList};
     use std::io::Write;
@@ -2554,5 +2558,47 @@ mod tests {
             codec.decode_response(&mut min).unwrap_err(),
             RPCError::InvalidData(_)
         ));
+    }
+
+    /// Test invalid snappy response.
+    #[test]
+    fn test_invalid_snappy_response() {
+        let config = Arc::new(Config::mainnet().rapid_upgrade());
+        let fork_context = Arc::new(ForkContext::dummy::<Mainnet>(
+            &config,
+            Phase::last().expect("there should be at least one phase"),
+        ));
+        let max_packet_size = config.max_payload_size; // 10 MiB.
+
+        let protocol = ProtocolId::new(SupportedProtocol::BlocksByRangeV2, Encoding::SSZSnappy);
+
+        let mut codec = SSZSnappyOutboundCodec::<Mainnet>::new(
+            protocol.clone(),
+            max_packet_size,
+            fork_context.clone(),
+        );
+
+        let mut payload = BytesMut::new();
+        payload.extend_from_slice(&[0u8]);
+        let deneb_epoch = config.deneb_fork_epoch;
+        payload.extend_from_slice(&fork_context.context_bytes(deneb_epoch).as_bytes());
+
+        // Claim the MAXIMUM allowed size (10 MiB)
+        let claimed_size = max_packet_size;
+        let mut uvi_codec: Uvi<usize> = Uvi::default();
+        uvi_codec.encode(claimed_size, &mut payload).unwrap();
+        payload.extend_from_slice(&[0xBB; 16]); // Junk snappy.
+
+        let result = codec.decode(&mut payload);
+
+        assert!(result.is_err(), "Expected decode to fail");
+
+        // IoError = reached snappy decode (allocation happened).
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, RPCError::InvalidData(_)),
+            "Should return invalid data variant {}",
+            err
+        );
     }
 }
