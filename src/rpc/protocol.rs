@@ -589,7 +589,7 @@ where
     P: Preset,
 {
     type Output = InboundOutput<TSocket, P>;
-    type Error = RPCError;
+    type Error = (Protocol, RPCError);
     type Future = BoxFuture<'static, Result<Self::Output, Self::Error>>;
 
     fn upgrade_inbound(self, socket: TSocket, protocol: ProtocolId) -> Self::Future {
@@ -632,10 +632,12 @@ where
                     )
                     .await
                     {
-                        Err(e) => Err(RPCError::from(e)),
+                        Err(e) => Err((versioned_protocol.protocol(), RPCError::from(e))),
                         Ok((Some(Ok(request)), stream)) => Ok((request, stream)),
-                        Ok((Some(Err(e)), _)) => Err(e),
-                        Ok((None, _)) => Err(RPCError::IncompleteStream),
+                        Ok((Some(Err(e)), _)) => Err((versioned_protocol.protocol(), e)),
+                        Ok((None, _)) => {
+                            Err((versioned_protocol.protocol(), RPCError::IncompleteStream))
+                        }
                     }
                 }
             }

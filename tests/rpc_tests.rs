@@ -1612,3 +1612,104 @@ async fn test_active_requests() {
         }
     }
 }
+
+// Test that when a node receives an invalid BlocksByRange request exceeding the maximum count,
+// it bans the sender.
+#[tokio::test]
+async fn test_request_too_large_blocks_by_range() {
+    let config = Arc::new(Config::mainnet().rapid_upgrade());
+
+    test_request_too_large(
+        AppRequestId::Application(1),
+        RequestType::BlocksByRange(OldBlocksByRangeRequest::new(
+            0,
+            config.max_request_blocks(Phase::Phase0) + 1, // exceeds the max request defined in the spec.
+            1,
+        )),
+    )
+    .await;
+}
+
+// Test that when a node receives an invalid BlobsByRange request exceeding the maximum count,
+// it bans the sender.
+#[tokio::test]
+async fn test_request_too_large_blobs_by_range() {
+    let config = Arc::new(Config::mainnet().rapid_upgrade());
+
+    let max_request_blobs_count =
+        config.max_request_blob_sidecars(Phase::Phase0) / config.max_blobs_per_block(0);
+    test_request_too_large(
+        AppRequestId::Application(1),
+        RequestType::BlobsByRange(BlobsByRangeRequest {
+            start_slot: 0,
+            count: max_request_blobs_count + 1, // exceeds the max request defined in the spec.
+        }),
+    )
+    .await;
+}
+
+async fn test_request_too_large(app_request_id: AppRequestId, request: RequestType<Mainnet>) {
+    // set up the logging. The level and enabled logging or not
+    let log_level = "debug";
+    let enable_logging = false;
+    build_tracing_subscriber(log_level, enable_logging);
+    let config = Arc::new(Config::mainnet().rapid_upgrade());
+
+    // get sender/receiver
+    let (mut sender, mut receiver) =
+        common::build_node_pair::<Mainnet>(&config, Phase::Phase0, Protocol::Tcp, false, None)
+            .await;
+
+    // Build the sender future
+    let sender_future = async {
+        loop {
+            match sender.next_event().await {
+                NetworkEvent::PeerConnectedOutgoing(peer_id) => {
+                    debug!(?request, %peer_id, "Sending RPC request");
+                    sender
+                        .send_request(peer_id, app_request_id, request.clone())
+                        .unwrap();
+                }
+                NetworkEvent::ResponseReceived {
+                    app_request_id,
+                    response,
+                    ..
+                } => {
+                    debug!(?app_request_id, ?response, "Received response");
+                }
+                NetworkEvent::RPCFailed { error, .. } => {
+                    // This variant should be unreachable, as the receiver doesn't respond with an error when a request exceeds the limit.
+                    debug!(?error, "RPC failed");
+                    unreachable!();
+                }
+                NetworkEvent::PeerDisconnected(peer_id) => {
+                    // The receiver should disconnect as a result of the invalid request.
+                    debug!(%peer_id, "Peer disconnected");
+                    // End the test.
+                    return;
+                }
+                _ => {}
+            }
+        }
+    }
+    .instrument(info_span!("Sender"));
+
+    // Build the receiver future
+    let receiver_future = async {
+        loop {
+            if let NetworkEvent::RequestReceived { .. } = receiver.next_event().await {
+                // This event should be unreachable, as the handler drops the invalid request.
+                unreachable!();
+            }
+        }
+    }
+    .instrument(info_span!("Receiver"));
+
+    tokio::select! {
+        _ = sender_future => {}
+        _ = receiver_future => {}
+        _ = sleep(Duration::from_secs(30)) => {
+            panic!("Future timed out");
+        }
+    }
+}
