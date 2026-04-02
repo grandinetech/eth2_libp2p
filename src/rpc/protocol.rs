@@ -6,7 +6,10 @@ use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, StreamExt};
 use helper_functions::misc;
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
-use ssz::{H256, ReadError, SszSize as _, SszWrite as _, WriteError};
+use ssz::{
+    BYTES_PER_LENGTH_OFFSET, ByteList, ContiguousList, H256, ReadError, SszSize as _,
+    SszWrite as _, WriteError,
+};
 use std::io;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -19,10 +22,15 @@ use tokio_util::{
     compat::{Compat, FuturesAsyncReadCompatExt},
 };
 use typenum::Unsigned as _;
+use types::capella::containers::Withdrawal;
 use types::deneb::containers::BlobIdentifier;
+use types::electra::containers::{
+    ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
+};
 use types::fulu::containers::DataColumnSidecar as FuluDataColumnSidecar;
 use types::gloas::containers::{
-    DataColumnSidecar as GloasDataColumnSidecar, SignedExecutionPayloadEnvelope,
+    DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayload, ExecutionPayloadEnvelope,
+    SignedExecutionPayloadEnvelope,
 };
 use types::phase0::primitives::Epoch;
 use types::{
@@ -79,15 +87,6 @@ pub static DATA_COLUMN_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
 /// Minimum SSZ size of SignedExecutionPayloadEnvelope (all variable fields at minimum).
 pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MIN: LazyLock<usize> = LazyLock::new(|| {
     SignedExecutionPayloadEnvelope::<Mainnet>::default()
-        .to_ssz()
-        .expect("should serialize")
-        .len()
-});
-
-/// Maximum SSZ size of SignedExecutionPayloadEnvelope.
-/// Uses .full() method which fills all variable-length fields to maximum.
-pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
-    SignedExecutionPayloadEnvelope::<Mainnet>::full()
         .to_ssz()
         .expect("should serialize")
         .len()
@@ -185,6 +184,49 @@ fn rpc_light_client_bootstrap_limits_by_fork<P: Preset>(current_fork: Phase) -> 
             )
         }
     }
+}
+
+/// Maximum SSZ size of SignedExecutionPayloadEnvelope.
+/// Uses arithmetic calculation for transactions instead of allocating full max-size payloads.
+pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MAX: LazyLock<usize> =
+    LazyLock::new(full_gloas_signed_execution_payload_envelope_size);
+
+/// Compute max SSZ size of SignedExecutionPayloadEnvelope without materializing transactions.
+///
+/// Populates all cheap fields at full capacity (extra_data, withdrawals, execution_requests).
+/// Transactions are left default (empty) and their max size is added arithmetically:
+/// N offsets (4 bytes each) + N * max_bytes_per_transaction.
+/// block_access_list is also default (empty); max size = max_bytes_per_transaction.
+fn full_gloas_signed_execution_payload_envelope_size() -> usize {
+    let envelope_with_default_txs = SignedExecutionPayloadEnvelope::<Mainnet> {
+        message: ExecutionPayloadEnvelope {
+            payload: ExecutionPayload {
+                extra_data: Arc::new(ByteList::from(ContiguousList::full(u8::MAX))),
+                transactions: Arc::new(ContiguousList::default()),
+                withdrawals: ContiguousList::full(Withdrawal::default()),
+                ..Default::default()
+            },
+            execution_requests: ExecutionRequests {
+                deposits: ContiguousList::full(DepositRequest::default()),
+                withdrawals: ContiguousList::full(WithdrawalRequest::default()),
+                consolidations: ContiguousList::full(ConsolidationRequest::default()),
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let base = envelope_with_default_txs
+        .to_ssz()
+        .expect("should serialize")
+        .len();
+
+    let max_transactions = <Mainnet as Preset>::MaxTransactionsPerPayload::USIZE
+        * (BYTES_PER_LENGTH_OFFSET + <Mainnet as Preset>::MaxBytesPerTransaction::USIZE);
+
+    let max_block_access_list = <Mainnet as Preset>::MaxBytesPerTransaction::USIZE;
+
+    base + max_transactions + max_block_access_list
 }
 
 fn rpc_execution_payload_envelope_limits() -> RpcLimits {
