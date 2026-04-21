@@ -1068,7 +1068,7 @@ impl<P: Preset> RpcSuccessResponse<P> {
             | RpcSuccessResponse::DataColumnsByRoot(column) => Some(column.slot()),
             RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(envelope)
             | RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(envelope) => {
-                Some(envelope.message.slot)
+                Some(envelope.message.payload.slot_number)
             }
             RpcSuccessResponse::LightClientBootstrap(b) => Some(b.slot()),
             RpcSuccessResponse::LightClientOptimisticUpdate(update) => {
@@ -1143,7 +1143,7 @@ impl<P: Preset> std::fmt::Display for RpcSuccessResponse<P> {
                 write!(
                     f,
                     "ExecutionPayloadEnvelope: slot: {}",
-                    envelope.message.slot
+                    envelope.message.payload.slot_number
                 )
             }
             RpcSuccessResponse::Pong(ping) => write!(f, "Pong: {}", ping.data),
