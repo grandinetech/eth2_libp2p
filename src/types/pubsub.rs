@@ -735,7 +735,7 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
                 write!(
                     f,
                     "Execution Payload: slot: {}, beacon_block_root: {:?}",
-                    data.message.slot, data.message.beacon_block_root
+                    data.message.payload.slot_number, data.message.beacon_block_root
                 )
             }
             PubsubMessage::PayloadAttestationMessage(data) => {
