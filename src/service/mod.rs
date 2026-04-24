@@ -875,7 +875,11 @@ impl<P: Preset> Network<P> {
 
     /// Publishes message on the pubsub (gossipsub) behaviour, choosing the encoding.
     pub fn publish(&mut self, message: PubsubMessage<P>) {
-        for topic in message.topics(GossipEncoding::default(), self.enr_fork_id.fork_digest) {
+        self.publish_with_digest(message, self.enr_fork_id.fork_digest);
+    }
+
+    pub fn publish_with_digest(&mut self, message: PubsubMessage<P>, digest: ForkDigest) {
+        for topic in message.topics(GossipEncoding::default(), digest) {
             let message_data = match message.encode(GossipEncoding::default()) {
                 Ok(message) => message,
                 Err(encoding_error) => {
