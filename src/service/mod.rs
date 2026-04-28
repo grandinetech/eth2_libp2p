@@ -1920,8 +1920,6 @@ impl<P: Preset> Network<P> {
                     self.inject_upnp_event(e);
                     None
                 }
-                #[allow(unreachable_patterns)]
-                BehaviourEvent::ConnectionLimits(le) => libp2p::core::util::unreachable(le),
             },
             SwarmEvent::ConnectionEstablished { .. } => None,
             SwarmEvent::ConnectionClosed { .. } => None,
