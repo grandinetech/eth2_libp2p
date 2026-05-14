@@ -28,7 +28,7 @@ use crate::peer_manager::peerdb::client::ClientKind;
 use crate::types::GossipKind;
 use libp2p::multiaddr;
 pub use peerdb::peer_info::{ConnectionDirection, PeerConnectionStatus, PeerInfo};
-use peerdb::score::{PeerAction, ReportSource};
+use peerdb::score::{DisconnectDirection, LastDisconnect, PeerAction, ReportSource};
 pub use peerdb::sync_status::{SyncInfo, SyncStatus};
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 use std::net::IpAddr;
@@ -150,6 +150,50 @@ pub enum PeerManagerEvent {
     DiscoverSubnetPeers(Vec<SubnetDiscovery>),
 }
 
+/// Maps an [`RPCError`] (and its inner status code, where applicable) to a
+/// stable, granular `'static` tag used as the `msg` for `report_peer` so
+/// external consumers can distinguish e.g. a rate limit from a ssz decode
+/// failure or an unsupported protocol.
+fn rpc_error_msg(err: &RPCError) -> &'static str {
+    match err {
+        RPCError::IncompleteStream => "rpc_incomplete_stream",
+        RPCError::HandlerRejected => "rpc_handler_rejected",
+        RPCError::InvalidData(_) => "rpc_invalid_data",
+        RPCError::SszReadError(_) => "rpc_ssz_decode_error",
+        RPCError::SszWriteError(_) => "rpc_ssz_encode_error",
+        RPCError::IoError(_) => "rpc_io_error",
+        RPCError::NegotiationTimeout => "rpc_negotiation_timeout",
+        RPCError::StreamTimeout => "rpc_stream_timeout",
+        RPCError::UnsupportedProtocol => "rpc_unsupported_protocol",
+        RPCError::Disconnected => "rpc_disconnected",
+        RPCError::InternalError(_) => "rpc_internal_error",
+        RPCError::ErrorResponse(code, _) => match code {
+            RpcErrorResponse::Unknown => "rpc_unknown_status",
+            RpcErrorResponse::ResourceUnavailable => "rpc_resource_unavailable",
+            RpcErrorResponse::ServerError => "rpc_server_error",
+            RpcErrorResponse::InvalidRequest => "rpc_invalid_request",
+            RpcErrorResponse::RateLimited => "rpc_rate_limited",
+            RpcErrorResponse::BlobsNotFoundForBlock => "rpc_blobs_not_found",
+        },
+    }
+}
+
+/// Returns a stable `'static` variant name for a [`GoodbyeReason`] suitable
+/// for JSON serialization on the `/eth/v1/node/peers` HTTP endpoint.
+pub(crate) fn goodbye_reason_name(reason: &GoodbyeReason) -> &'static str {
+    match reason {
+        GoodbyeReason::ClientShutdown => "ClientShutdown",
+        GoodbyeReason::IrrelevantNetwork => "IrrelevantNetwork",
+        GoodbyeReason::Fault => "Fault",
+        GoodbyeReason::UnableToVerifyNetwork => "UnableToVerifyNetwork",
+        GoodbyeReason::TooManyPeers => "TooManyPeers",
+        GoodbyeReason::BadScore => "BadScore",
+        GoodbyeReason::Banned => "Banned",
+        GoodbyeReason::BannedIP => "BannedIP",
+        GoodbyeReason::Unknown => "Unknown",
+    }
+}
+
 impl PeerManager {
     // NOTE: Must be run inside a tokio executor.
     pub fn new<P: Preset>(
@@ -214,12 +258,24 @@ impl PeerManager {
     ///
     /// This will send a goodbye and disconnect the peer if it is connected or dialing.
     pub fn goodbye_peer(&mut self, peer_id: &PeerId, reason: GoodbyeReason, source: ReportSource) {
+        // Capture the goodbye details for the `/eth/v1/node/peers` API before
+        // `reason` is consumed by `report_peer` below.
+        let reason_name = goodbye_reason_name(&reason);
+        let reason_code: u64 = reason.into();
+        let last_disconnect = LastDisconnect {
+            reason: reason_name,
+            code: reason_code,
+            direction: DisconnectDirection::Sent,
+            at: Instant::now(),
+        };
+
         // Update the sync status if required
         if let Some(info) = self.network_globals.peers.write().peer_info_mut(peer_id) {
             debug!(%peer_id, %reason, score = %info.score(), "Sending goodbye to peer");
             if matches!(reason, GoodbyeReason::IrrelevantNetwork) {
                 info.update_sync_status(SyncStatus::IrrelevantPeer);
             }
+            info.set_last_disconnect(last_disconnect);
         }
 
         self.report_peer(
@@ -657,13 +713,8 @@ impl PeerManager {
             RPCError::Disconnected => return, // No penalty for a graceful disconnection
         };
 
-        self.report_peer(
-            peer_id,
-            peer_action,
-            ReportSource::RPC,
-            None,
-            "handle_rpc_error",
-        );
+        let msg = rpc_error_msg(err);
+        self.report_peer(peer_id, peer_action, ReportSource::RPC, None, msg);
     }
 
     /// A ping request has been received.
