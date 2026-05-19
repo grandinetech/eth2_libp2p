@@ -2,12 +2,14 @@
 
 use crate::TopicHash;
 use crate::types::{ForkContext, GossipEncoding, GossipKind, GossipTopic};
+use base64::prelude::*;
 use libp2p::gossipsub;
 use snap::raw::{Decoder, Encoder, decompress_len};
 use ssz::{SszReadDefault, SszWrite as _, WriteError};
 use std::boxed::Box;
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
+use tracing::info;
 use types::electra::containers::SingleAttestation;
 use types::{
     altair::containers::{
@@ -267,9 +269,10 @@ impl<P: Preset> PubsubMessage<P> {
                         }
                     }
                     GossipKind::BeaconBlock => {
-                        let beacon_block = match fork_context
-                            .get_fork_from_context_bytes(gossip_topic.fork_digest)
-                        {
+                        let phase =
+                            fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest);
+
+                        let beacon_block = match phase {
                             Some(Phase::Phase0) => SignedBeaconBlock::Phase0(
                                 Phase0SignedBeaconBlock::from_ssz_default(data)
                                     .map_err(|e| format!("{:?}", e))?,
@@ -309,6 +312,18 @@ impl<P: Preset> PubsubMessage<P> {
                                 ));
                             }
                         };
+
+                        if let Some(phase) = phase {
+                            let base64_encoded = BASE64_STANDARD.encode(data);
+
+                            info!(
+                                "GRANDINE_PAYLOAD_DUMP slot={} received {phase} beacon block {:?} as gossip (transactions root: {:?}): {base64_encoded}",
+                                beacon_block.message().slot(),
+                                beacon_block.message().hash_tree_root(),
+                                beacon_block.transactions_root(),
+                            );
+                        }
+
                         Ok(PubsubMessage::BeaconBlock(Arc::new(beacon_block)))
                     }
                     GossipKind::BlobSidecar(blob_index) => {
