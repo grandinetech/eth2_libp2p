@@ -84,6 +84,10 @@ const PROTOCOL_PREFIX: &str = "/eth2/beacon_chain/req";
 /// The number of seconds to wait for the first bytes of a request once a protocol has been
 /// established before the stream is terminated.
 const REQUEST_TIMEOUT: u64 = 15;
+/// After decoding a request, the peer is expected to have closed the write side of the stream.
+/// Wait up to this duration for EOF so we can reject trailing bytes per
+/// `phase0/p2p-interface.md` (`InvalidRequest` on any remaining bytes after the SSZ payload).
+const REQUEST_TRAILING_BYTES_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Returns the rpc limits for beacon_block_by_range and beacon_block_by_root responses.
 ///
@@ -633,7 +637,28 @@ where
                     .await
                     {
                         Err(e) => Err((versioned_protocol.protocol(), RPCError::from(e))),
-                        Ok((Some(Ok(request)), stream)) => Ok((request, stream)),
+                        Ok((Some(Ok(request)), mut stream)) => {
+                            match tokio::time::timeout(
+                                REQUEST_TRAILING_BYTES_TIMEOUT,
+                                stream.next(),
+                            )
+                            .await
+                            {
+                                Ok(None) => Ok((request, stream)),
+                                Ok(Some(_)) => Err((
+                                    versioned_protocol.protocol(),
+                                    RPCError::InvalidData(
+                                        "trailing bytes after request payload".into(),
+                                    ),
+                                )),
+                                Err(_) => Err((
+                                    versioned_protocol.protocol(),
+                                    RPCError::InvalidData(
+                                        "request stream not closed after request payload".into(),
+                                    ),
+                                )),
+                            }
+                        }
                         Ok((Some(Err(e)), _)) => Err((versioned_protocol.protocol(), e)),
                         Ok((None, _)) => {
                             Err((versioned_protocol.protocol(), RPCError::IncompleteStream))
