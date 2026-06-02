@@ -222,7 +222,7 @@ fn full_gloas_signed_execution_payload_envelope_size() -> usize {
         .len();
 
     let max_transactions = <Mainnet as Preset>::MaxTransactionsPerPayload::USIZE
-        * (BYTES_PER_LENGTH_OFFSET + <Mainnet as Preset>::MaxBytesPerTransaction::USIZE);
+        * (BYTES_PER_LENGTH_OFFSET.get() + <Mainnet as Preset>::MaxBytesPerTransaction::USIZE);
 
     let max_block_access_list = <Mainnet as Preset>::MaxBytesPerTransaction::USIZE;
 
