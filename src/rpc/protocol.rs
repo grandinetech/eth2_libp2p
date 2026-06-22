@@ -24,13 +24,11 @@ use tokio_util::{
 use typenum::Unsigned as _;
 use types::capella::containers::Withdrawal;
 use types::deneb::containers::BlobIdentifier;
-use types::electra::containers::{
-    ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
-};
+use types::electra::containers::{ConsolidationRequest, DepositRequest, WithdrawalRequest};
 use types::fulu::containers::DataColumnSidecar as FuluDataColumnSidecar;
 use types::gloas::containers::{
-    DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayload, ExecutionPayloadEnvelope,
-    SignedExecutionPayloadEnvelope,
+    BuilderDepositRequest, BuilderExitRequest, DataColumnSidecar as GloasDataColumnSidecar,
+    ExecutionPayload, ExecutionPayloadEnvelope, ExecutionRequests, SignedExecutionPayloadEnvelope,
 };
 use types::phase0::primitives::Epoch;
 use types::{
@@ -210,6 +208,8 @@ fn full_gloas_signed_execution_payload_envelope_size() -> usize {
                 deposits: ContiguousList::full(DepositRequest::default()),
                 withdrawals: ContiguousList::full(WithdrawalRequest::default()),
                 consolidations: ContiguousList::full(ConsolidationRequest::default()),
+                builder_deposits: ContiguousList::full(BuilderDepositRequest::default()),
+                builder_exits: ContiguousList::full(BuilderExitRequest::default()),
             },
             ..Default::default()
         },
