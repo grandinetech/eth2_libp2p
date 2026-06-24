@@ -20,7 +20,7 @@ use types::{
         Attestation, AttesterSlashing, DataColumnSidecar, LightClientFinalityUpdate,
         LightClientOptimisticUpdate, SignedAggregateAndProof, SignedBeaconBlock,
     },
-    deneb::containers::{BlobSidecar, SignedBeaconBlock as DenebBeaconBlock},
+    deneb::containers::SignedBeaconBlock as DenebBeaconBlock,
     electra::containers::{
         AttesterSlashing as ElectraAttesterSlashing,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof,
@@ -50,8 +50,6 @@ use types::{
 pub enum PubsubMessage<P: Preset> {
     /// Gossipsub message providing notification of a new block.
     BeaconBlock(Arc<SignedBeaconBlock<P>>),
-    /// Gossipsub message providing notification of a [`BlobSidecar`] along with the subnet id where it was received.
-    BlobSidecar(Box<(SubnetId, Arc<BlobSidecar<P>>)>),
     /// Gossipsub message providing notification of a [`DataColumnSidecar`] along with the subnet id where it was received.
     DataColumnSidecar(Box<(SubnetId, Arc<DataColumnSidecar<P>>)>),
     /// Gossipsub message providing notification of a Aggregate attestation and associated proof.
@@ -161,9 +159,6 @@ impl<P: Preset> PubsubMessage<P> {
     pub fn kind(&self) -> GossipKind {
         match self {
             PubsubMessage::BeaconBlock(_) => GossipKind::BeaconBlock,
-            PubsubMessage::BlobSidecar(blob_sidecar_data) => {
-                GossipKind::BlobSidecar(blob_sidecar_data.0)
-            }
             PubsubMessage::DataColumnSidecar(column_sidecar_data) => {
                 GossipKind::DataColumnSidecar(column_sidecar_data.0)
             }
@@ -310,32 +305,6 @@ impl<P: Preset> PubsubMessage<P> {
                             }
                         };
                         Ok(PubsubMessage::BeaconBlock(Arc::new(beacon_block)))
-                    }
-                    GossipKind::BlobSidecar(blob_index) => {
-                        match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
-                            Some(Phase::Deneb | Phase::Electra) => {
-                                let blob_sidecar = Arc::new(
-                                    BlobSidecar::from_ssz_default(data)
-                                        .map_err(|e| format!("{:?}", e))?,
-                                );
-                                Ok(PubsubMessage::BlobSidecar(Box::new((
-                                    *blob_index,
-                                    blob_sidecar,
-                                ))))
-                            }
-                            Some(
-                                Phase::Phase0
-                                | Phase::Altair
-                                | Phase::Bellatrix
-                                | Phase::Capella
-                                | Phase::Fulu
-                                | Phase::Gloas,
-                            )
-                            | None => Err(format!(
-                                "beacon_blobs_and_sidecar topic invalid for given fork digest {:?}",
-                                gossip_topic.fork_digest
-                            )),
-                        }
                     }
                     GossipKind::DataColumnSidecar(subnet_id) => {
                         match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
@@ -582,7 +551,6 @@ impl<P: Preset> PubsubMessage<P> {
         // messages for us.
         match &self {
             PubsubMessage::BeaconBlock(data) => data.to_ssz(),
-            PubsubMessage::BlobSidecar(data) => data.1.to_ssz(),
             PubsubMessage::DataColumnSidecar(data) => data.1.to_ssz(),
             PubsubMessage::AggregateAndProofAttestation(data) => data.to_ssz(),
             PubsubMessage::VoluntaryExit(data) => data.to_ssz(),
@@ -608,11 +576,6 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
                 "Beacon Block: slot: {}, proposer_index: {}",
                 block.message().slot(),
                 block.message().proposer_index()
-            ),
-            PubsubMessage::BlobSidecar(data) => write!(
-                f,
-                "BlobSidecar: slot: {}, blob index: {}",
-                data.1.signed_block_header.message.slot, data.1.index,
             ),
             PubsubMessage::DataColumnSidecar(data) => write!(
                 f,
