@@ -798,9 +798,38 @@ impl PeerDB {
         );
     }
 
-    /// Updates the connection state. MUST ONLY BE USED IN TESTS.
-    pub fn __add_connected_peer_testing_only<P: Preset>(&mut self, supernode: bool) -> PeerId {
+    /// Adds a connected peer to the PeerDB and sets the custody subnets.
+    /// WARNING: This updates the connection state. MUST ONLY BE USED IN TESTS.
+    pub fn __add_connected_peer_with_custody_subnets<P: Preset>(
+        &mut self,
+        supernode: bool,
+    ) -> PeerId {
         let enr_key = CombinedKey::generate_secp256k1();
+        let peer_id = self.__add_connected_peer(supernode, enr_key);
+
+        let subnets = if supernode {
+            (0..self.chain_config.data_column_sidecar_subnet_count)
+                .map(|subnet_id| subnet_id.into())
+                .collect()
+        } else {
+            let node_id = peer_id_to_node_id(&peer_id).expect("convert peer_id to node_id");
+            compute_subnets_for_node::<P>(
+                &self.chain_config,
+                node_id.raw(),
+                self.chain_config.custody_requirement,
+            )
+            .expect("should compute custody subnets")
+        };
+
+        let peer_info = self.peers.get_mut(&peer_id).expect("peer exists");
+        peer_info.set_custody_subnets(subnets);
+
+        peer_id
+    }
+
+    /// Adds a connected peer to the PeerDB and updates the connection state.
+    /// MUST ONLY BE USED IN TESTS.
+    pub fn __add_connected_peer(&mut self, supernode: bool, enr_key: CombinedKey) -> PeerId {
         let mut enr = Enr::builder().build(&enr_key).unwrap();
         let peer_id = enr.peer_id();
 
@@ -836,25 +865,19 @@ impl PeerDB {
             },
         );
 
-        if supernode {
-            let peer_info = self.peers.get_mut(&peer_id).expect("peer exists");
-            let all_subnets = (0..self.chain_config.data_column_sidecar_subnet_count)
-                .map(|subnet_id| subnet_id.into())
-                .collect();
-            peer_info.set_custody_subnets(all_subnets);
-        } else {
-            let peer_info = self.peers.get_mut(&peer_id).expect("peer exists");
-            let node_id = peer_id_to_node_id(&peer_id).expect("convert peer_id to node_id");
-            let subnets = compute_subnets_for_node::<P>(
-                &self.chain_config,
-                node_id.raw(),
-                self.chain_config.custody_requirement,
-            )
-            .expect("should compute custody subnets");
-            peer_info.set_custody_subnets(subnets);
-        }
-
         peer_id
+    }
+
+    /// MUST ONLY BE USED IN TESTS.
+    pub fn __set_custody_subnets(
+        &mut self,
+        peer_id: &PeerId,
+        custody_subnets: HashSet<SubnetId>,
+    ) -> Result<(), String> {
+        self.peers
+            .get_mut(peer_id)
+            .map(|info| info.set_custody_subnets(custody_subnets))
+            .ok_or_else(|| "Cannot set custody subnets, peer not found".to_string())
     }
 
     /// The connection state of the peer has been changed. Modify the peer in the db to ensure all
