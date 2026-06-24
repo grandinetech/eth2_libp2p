@@ -65,8 +65,10 @@ fn bellatrix_block_small<P: Preset>(config: &Config) -> BellatrixSignedBeaconBlo
 /// The max limit for a merge block is in the order of ~16GiB which wouldn't fit in memory.
 /// Hence, we generate a merge block just greater than `MAX_RPC_SIZE` to test rejection on the rpc layer.
 fn bellatrix_block_large<P: Preset>(config: &Config) -> BellatrixSignedBeaconBlock<P> {
+    // 11,000 × 1KB ≈ 11MB, just above the 10MB max_payload_size.
+    // Previously used 100,000 txs (~100MB) which caused hangs and timeouts.
     let tx = ByteList::<P::MaxBytesPerTransaction>::from_ssz_default([0; 1024]).unwrap();
-    let txs = Arc::new(ContiguousList::try_from_iter(std::iter::repeat_n(tx, 100000)).unwrap());
+    let txs = Arc::new(ContiguousList::try_from_iter(std::iter::repeat_n(tx, 11000)).unwrap());
 
     let block = BellatrixSignedBeaconBlock {
         message: BellatrixBeaconBlock {

@@ -1209,8 +1209,10 @@ mod tests {
     fn bellatrix_block_large<P: Preset>(config: &Config) -> BellatrixSignedBeaconBlock<P> {
         // The context bytes are now derived from the block epoch, so we need to have the slot set
         // here.
+        // 11,000 × 1KB ≈ 11MB, just above the 10MB max_payload_size.
+        // Previously used 100,000 txs (~100MB) which made this test take >60s.
         let tx = ByteList::<P::MaxBytesPerTransaction>::from_ssz_default([0; 1024]).unwrap();
-        let txs = Arc::new(ContiguousList::try_from_iter(std::iter::repeat_n(tx, 100000)).unwrap());
+        let txs = Arc::new(ContiguousList::try_from_iter(std::iter::repeat_n(tx, 11000)).unwrap());
 
         let block = BellatrixSignedBeaconBlock {
             message: BellatrixBeaconBlock {
