@@ -2,7 +2,7 @@
 //!
 //! This module creates a libp2p dummy-behaviour built around the discv5 protocol. It handles
 //! queries and manages access to the discovery routing table.
-use core::{marker::PhantomData, num::NonZeroUsize};
+use core::marker::PhantomData;
 
 pub(crate) mod enr;
 pub mod enr_ext;
@@ -23,6 +23,7 @@ use enr::{
 };
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;
+use hashlink::lru_cache::LruCache;
 use libp2p::core::transport::PortUse;
 use libp2p::multiaddr::Protocol;
 use libp2p::swarm::THandlerInEvent;
@@ -36,7 +37,6 @@ pub use libp2p::{
     },
 };
 use logging::exception;
-use lru::LruCache;
 use ssz::SszWrite;
 use std::{
     collections::{HashMap, VecDeque},
@@ -77,7 +77,7 @@ pub const FIND_NODE_QUERY_CLOSEST_PEERS: usize = 16;
 /// The threshold for updating `min_ttl` on a connected peer.
 const DURATION_DIFFERENCE: Duration = Duration::from_millis(1);
 /// The capacity of the Discovery ENR cache.
-const ENR_CACHE_CAPACITY: Option<NonZeroUsize> = NonZeroUsize::new(50);
+const ENR_CACHE_CAPACITY: usize = 50;
 
 /// A query has completed. This result contains a mapping of discovered peer IDs to the `min_ttl`
 /// of the peer if it is specified.
@@ -319,9 +319,7 @@ impl<P: Preset> Discovery<P> {
 
         Ok(Self {
             chain_config,
-            cached_enrs: LruCache::new(
-                ENR_CACHE_CAPACITY.expect("cached_enrs cache size cannot be zero"),
-            ),
+            cached_enrs: LruCache::new(ENR_CACHE_CAPACITY),
             network_globals,
             find_peer_active: false,
             queued_queries: VecDeque::with_capacity(10),
@@ -347,7 +345,7 @@ impl<P: Preset> Discovery<P> {
 
     /// Removes a cached ENR from the list.
     pub fn remove_cached_enr(&mut self, peer_id: &PeerId) -> Option<Enr> {
-        self.cached_enrs.pop(peer_id)
+        self.cached_enrs.remove(peer_id)
     }
 
     /// This adds a new `FindPeers` query to the queue if one doesn't already exist.
@@ -383,7 +381,7 @@ impl<P: Preset> Discovery<P> {
     /// Add an ENR to the routing table of the discovery mechanism.
     pub fn add_enr(&mut self, enr: Enr) {
         // add the enr to seen caches
-        self.cached_enrs.put(enr.peer_id(), enr.clone());
+        self.cached_enrs.insert(enr.peer_id(), enr.clone());
 
         if let Err(e) = self.discv5.add_enr(enr) {
             debug!(
@@ -652,7 +650,7 @@ impl<P: Preset> Discovery<P> {
         }
         // Remove the peer from the cached list, to prevent redialing disconnected
         // peers.
-        self.cached_enrs.pop(peer_id);
+        self.cached_enrs.remove(peer_id);
     }
 
     /* Internal Functions */
@@ -860,7 +858,7 @@ impl<P: Preset> Discovery<P> {
                             .into_iter()
                             .map(|enr| {
                                 // cache the found ENR's
-                                self.cached_enrs.put(enr.peer_id(), enr.clone());
+                                self.cached_enrs.insert(enr.peer_id(), enr.clone());
                                 (enr, None)
                             })
                             .collect();
@@ -894,7 +892,7 @@ impl<P: Preset> Discovery<P> {
 
                         // cache the found ENR's
                         for enr in r.iter().cloned() {
-                            self.cached_enrs.put(enr.peer_id(), enr);
+                            self.cached_enrs.insert(enr.peer_id(), enr);
                         }
 
                         // Map each subnet query's min_ttl to the set of ENR's returned for that subnet.

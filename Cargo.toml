@@ -23,13 +23,13 @@ fnv = { workspace = true }
 futures = { workspace = true }
 grandine_version = { workspace = true }
 helper_functions = { workspace = true }
+hashlink = { workspace = true }
 hex = { workspace = true }
 itertools = { workspace = true }
 libp2p = { workspace = true }
 libp2p-mplex = { workspace = true }
 local-ip-address = { workspace = true }
 logging = { workspace = true }
-lru = { workspace = true }
 parking_lot = { workspace = true }
 prometheus = { workspace = true }
 prometheus-client = { workspace = true }
