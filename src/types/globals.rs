@@ -13,7 +13,7 @@ use std_ext::ArcExt as _;
 use tracing::{debug, error};
 use types::config::Config as ChainConfig;
 use types::fulu::primitives::ColumnIndex;
-use types::phase0::primitives::SubnetId;
+use types::phase0::primitives::{Slot, SubnetId};
 use types::preset::Preset;
 
 pub struct NetworkGlobals {
@@ -204,14 +204,19 @@ impl NetworkGlobals {
     /// Returns a connected peer that:
     /// 1. is connected
     /// 2. assigned to custody the column based on it's `custody_subnet_count` from ENR or metadata
-    /// 3. has a good score
-    pub fn custody_peers_for_column(&self, column_index: ColumnIndex) -> Vec<PeerId> {
+    /// 3. has data available past the given slot
+    /// 4. has a good score
+    pub fn custody_peers_for_column(
+        &self,
+        column_index: ColumnIndex,
+        block_slot: Slot,
+    ) -> Vec<PeerId> {
         self.peers
             .read()
-            .good_custody_subnet_peer(compute_subnet_for_data_column_sidecar(
-                &self.config,
-                column_index,
-            ))
+            .good_custody_subnet_peer(
+                compute_subnet_for_data_column_sidecar(&self.config, column_index),
+                block_slot,
+            )
             .cloned()
             .collect::<Vec<_>>()
     }
