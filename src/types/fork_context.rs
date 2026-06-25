@@ -109,13 +109,16 @@ impl ForkContext {
         self.current_fork.read().fork_digest
     }
 
-    /// Returns the next fork digest. If there's no future fork, returns the current fork digest.
-    pub fn next_fork_digest(&self) -> Option<ForkDigest> {
+    /// Per [spec](https://github.com/ethereum/consensus-specs/blob/1baa05e71148b0975e28918ac6022d2256b56f4a/specs/fulu/p2p-interface.md?plain=1#L636-L637)
+    /// `nfd` must be zero-valued when no next fork is scheduled.
+    /// Returns the next fork digest. If there's no future fork, returns zero-valued bytes.
+    pub fn next_fork_digest(&self) -> ForkDigest {
         let current_fork_epoch = self.current_fork_epoch();
         self.epoch_to_forks
             .range(current_fork_epoch..)
             .nth(1)
             .map(|(_, fork)| fork.fork_digest)
+            .unwrap_or_default()
     }
 
     /// Returns the next fork digest and next fork epoch.
@@ -252,10 +255,46 @@ mod tests {
 
         let context = ForkContext::new::<Mainnet>(&chain_config, electra_end_slot, genesis_root);
 
-        let next_digest = context.next_fork_digest().unwrap();
+        let next_digest = context.next_fork_digest();
         let expected_digest =
             misc::compute_fork_digest(&chain_config, genesis_root, chain_config.fulu_fork_epoch);
         assert_eq!(next_digest, expected_digest);
+    }
+
+    #[test]
+    fn test_next_fork_digest_returns_zero_when_no_next_fork() {
+        let chain_config = make_chain_config();
+        let genesis_root = H256::zero();
+        // Epoch 100 is the last BPO fork in make_chain_config
+        let last_bpo_slot = misc::compute_start_slot_at_epoch::<Mainnet>(101).saturating_sub(1);
+
+        let context = ForkContext::new::<Mainnet>(&chain_config, last_bpo_slot, genesis_root);
+
+        // No next fork after the last BPO epoch — must return zero bytes per spec
+        assert_eq!(context.next_fork_digest(), ForkDigest::default());
+    }
+
+    #[test]
+    fn test_next_fork_digest_zero_after_runtime_transition_to_last_fork() {
+        let chain_config = make_chain_config();
+        let genesis_root = H256::zero();
+        // Start at Gloas (epoch 7)
+        let gloas_slot =
+            misc::compute_start_slot_at_epoch::<Mainnet>(chain_config.gloas_fork_epoch + 1)
+                .saturating_sub(1);
+
+        let context = ForkContext::new::<Mainnet>(&chain_config, gloas_slot, genesis_root);
+
+        // Before: next fork exists (BPO at epoch 50)
+        let bpo_50_digest = misc::compute_fork_digest(&chain_config, genesis_root, 50);
+        assert_eq!(context.next_fork_digest(), bpo_50_digest);
+
+        // Simulate runtime transitions to the last BPO fork (epoch 100)
+        context.update_current_fork(); // epoch 7 → 50
+        context.update_current_fork(); // epoch 50 → 100
+
+        // After: no next fork — must return zero bytes per spec
+        assert_eq!(context.next_fork_digest(), ForkDigest::default());
     }
 
     #[test]

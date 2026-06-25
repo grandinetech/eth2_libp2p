@@ -198,9 +198,7 @@ impl<P: Preset> Network<P> {
 
         // set up a collection of variables accessible outside of the network crate
         // Create an ENR or load from disk if appropriate
-        // Per [spec](https://github.com/ethereum/consensus-specs/blob/1baa05e71148b0975e28918ac6022d2256b56f4a/specs/fulu/p2p-interface.md?plain=1#L636-L637)
-        // `nfd` must be zero-valued when no next fork is scheduled.
-        let next_fork_digest = ctx.fork_context.next_fork_digest().unwrap_or_default();
+        let next_fork_digest = ctx.fork_context.next_fork_digest();
 
         let custody_group_count_opt = chain_config
             .is_peerdas_scheduled()
