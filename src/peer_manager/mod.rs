@@ -2040,11 +2040,11 @@ mod tests {
             .peer_info_mut(&peer0)
             .unwrap()
             .set_meta_data(MetaData::V3(metadata));
-        peer_manager
-            .network_globals
-            .peers
-            .write()
-            .add_subscription(&peer0, Subnet::Attestation(1));
+        peer_manager.network_globals.peers.write().add_subscription(
+            &peer0,
+            Subnet::Attestation(1),
+            false,
+        );
 
         let mut attnets = crate::types::EnrAttestationBitfield::default();
         attnets.set(10, true);
@@ -2061,11 +2061,11 @@ mod tests {
             .peer_info_mut(&peer2)
             .unwrap()
             .set_meta_data(MetaData::V3(metadata));
-        peer_manager
-            .network_globals
-            .peers
-            .write()
-            .add_subscription(&peer2, Subnet::Attestation(10));
+        peer_manager.network_globals.peers.write().add_subscription(
+            &peer2,
+            Subnet::Attestation(10),
+            false,
+        );
 
         let mut syncnets = crate::types::EnrSyncCommitteeBitfield::default();
         syncnets.set(3, true);
@@ -2082,11 +2082,11 @@ mod tests {
             .peer_info_mut(&peer4)
             .unwrap()
             .set_meta_data(MetaData::V3(metadata));
-        peer_manager
-            .network_globals
-            .peers
-            .write()
-            .add_subscription(&peer4, Subnet::SyncCommittee(3));
+        peer_manager.network_globals.peers.write().add_subscription(
+            &peer4,
+            Subnet::SyncCommittee(3),
+            false,
+        );
 
         // Perform the heartbeat.
         peer_manager.heartbeat();
@@ -2183,11 +2183,11 @@ mod tests {
                 peer_info.update_sync_status(empty_synced_status());
             }
 
-            peer_manager
-                .network_globals
-                .peers
-                .write()
-                .add_subscription(&peer, Subnet::DataColumn(subnet.into()));
+            peer_manager.network_globals.peers.write().add_subscription(
+                &peer,
+                Subnet::DataColumn(subnet.into()),
+                false,
+            );
             println!("{},{},{}", x, subnet, peer);
             peers.push(peer);
         }
@@ -2300,7 +2300,7 @@ mod tests {
                     .network_globals
                     .peers
                     .write()
-                    .add_subscription(&peer, subnet);
+                    .add_subscription(&peer, subnet, false);
             }
             println!("{},{}", x, peer);
             peers.push(peer);
@@ -2400,7 +2400,7 @@ mod tests {
                     .network_globals
                     .peers
                     .write()
-                    .add_subscription(&peer, subnet);
+                    .add_subscription(&peer, subnet, false);
             }
             peers.push(peer);
         }
@@ -2494,7 +2494,7 @@ mod tests {
                     .network_globals
                     .peers
                     .write()
-                    .add_subscription(&peer, subnet);
+                    .add_subscription(&peer, subnet, false);
             }
             println!("{},{}", peer_idx, peer);
             peers.push(peer);
@@ -2665,7 +2665,7 @@ mod tests {
                     .network_globals
                     .peers
                     .write()
-                    .add_subscription(&peer, subnet);
+                    .add_subscription(&peer, subnet, false);
             }
             peers.push(peer);
         }
@@ -2732,11 +2732,11 @@ mod tests {
                 .unwrap()
                 .set_meta_data(MetaData::V3(metadata));
 
-            peer_manager
-                .network_globals
-                .peers
-                .write()
-                .add_subscription(&peer, Subnet::Attestation((subnet as u64).into()));
+            peer_manager.network_globals.peers.write().add_subscription(
+                &peer,
+                Subnet::Attestation((subnet as u64).into()),
+                false,
+            );
 
             peers.push(peer);
         }
@@ -2837,7 +2837,7 @@ mod tests {
                     .network_globals
                     .peers
                     .write()
-                    .add_subscription(&peer, subnet);
+                    .add_subscription(&peer, subnet, false);
             }
 
             peers.push(peer);
@@ -2922,7 +2922,7 @@ mod tests {
                 }
 
                 for subnet in peer_info.long_lived_subnets() {
-                    peers_db.add_subscription(&peer, subnet);
+                    peers_db.add_subscription(&peer, subnet, false);
                 }
 
                 peers.push(peer);
@@ -3144,7 +3144,7 @@ mod tests {
                         peer_info.set_custody_subnets(condition.custody_subnets.clone());
 
                         for subnet in peer_info.long_lived_subnets() {
-                            peer_db.add_subscription(&condition.peer_id, subnet);
+                            peer_db.add_subscription(&condition.peer_id, subnet, false);
                         }
                     }
 

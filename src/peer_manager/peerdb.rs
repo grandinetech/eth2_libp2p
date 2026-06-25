@@ -719,9 +719,14 @@ impl PeerDB {
 
     /// Adds a gossipsub subscription to a peer in the peerdb.
     // VISIBILITY: The behaviour is able to adjust subscriptions.
-    pub(crate) fn add_subscription(&mut self, peer_id: &PeerId, subnet: Subnet) {
+    pub(crate) fn add_subscription(
+        &mut self,
+        peer_id: &PeerId,
+        subnet: Subnet,
+        supports_partials: bool,
+    ) {
         if let Some(info) = self.peers.get_mut(peer_id) {
-            info.insert_subnet(subnet);
+            info.insert_subnet(subnet, supports_partials);
         }
     }
 

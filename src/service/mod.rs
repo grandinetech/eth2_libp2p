@@ -1351,7 +1351,7 @@ impl<P: Preset> Network<P> {
                         self.network_globals
                             .peers
                             .write()
-                            .add_subscription(&peer_id, subnet_id);
+                            .add_subscription(&peer_id, subnet_id, false);
                     }
                     // Try to send the cached messages for this topic
                     if let Some(msgs) = self.gossip_cache.retrieve(&topic) {
