@@ -26,8 +26,8 @@ use api_types::{AppRequestId, Response};
 use futures::stream::StreamExt;
 use gossipsub_scoring_parameters::{PeerScoreSettings, peer_gossip_thresholds};
 use libp2p::gossipsub::{
-    self, IdentTopic as Topic, MessageAcceptance, MessageAuthenticity, MessageId, PublishError,
-    TopicScoreParams,
+    self, Event, IdentTopic as Topic, MessageAcceptance, MessageAuthenticity, MessageId,
+    PublishError, TopicScoreParams,
 };
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::{self, Multiaddr, Protocol as MProtocol};
@@ -318,14 +318,9 @@ impl<P: Preset> Network<P> {
                     all_topics_at_fork(&chain_config, phase)
                         .into_iter()
                         .map(|topic| {
-                            Topic::new(GossipTopic::new(
-                                topic,
-                                GossipEncoding::default(),
-                                fork_digest,
-                            ))
-                            .into()
+                            GossipTopic::new(topic, GossipEncoding::default(), fork_digest)
                         })
-                        .collect::<Vec<TopicHash>>()
+                        .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
 
@@ -386,7 +381,9 @@ impl<P: Preset> Network<P> {
             // track of
             if ctx.libp2p_registry.is_some() {
                 for topics in all_topics_for_forks {
-                    gossipsub.register_topics_for_metrics(topics);
+                    gossipsub.register_topics_for_metrics(
+                        topics.into_iter().map(|t| Topic::new(t).hash()).collect(),
+                    );
                 }
             }
 
@@ -1320,9 +1317,9 @@ impl<P: Preset> Network<P> {
     /* Sub-behaviour event handling functions */
 
     /// Handle a gossipsub event.
-    fn inject_gs_event(&mut self, event: gossipsub::Event) -> Option<NetworkEvent<P>> {
+    fn inject_gs_event(&mut self, event: Event) -> Option<NetworkEvent<P>> {
         match event {
-            gossipsub::Event::Message {
+            Event::Message {
                 propagation_source,
                 message_id: id,
                 message: gs_msg,
@@ -1350,7 +1347,7 @@ impl<P: Preset> Network<P> {
                     }
                 }
             }
-            gossipsub::Event::Subscribed { peer_id, topic } => {
+            Event::Subscribed { peer_id, topic, .. } => {
                 if let Ok(topic) = GossipTopic::decode(topic.as_str()) {
                     if let Some(subnet_id) = topic.subnet_id() {
                         self.network_globals
@@ -1403,7 +1400,7 @@ impl<P: Preset> Network<P> {
                     }
                 }
             }
-            gossipsub::Event::Unsubscribed { peer_id, topic } => {
+            Event::Unsubscribed { peer_id, topic } => {
                 if let Some(subnet_id) = subnet_from_topic_hash(&topic) {
                     self.network_globals
                         .peers
@@ -1411,7 +1408,7 @@ impl<P: Preset> Network<P> {
                         .remove_subscription(&peer_id, &subnet_id);
                 }
             }
-            gossipsub::Event::GossipsubNotSupported { peer_id } => {
+            Event::GossipsubNotSupported { peer_id } => {
                 debug!(%peer_id, "Peer does not support gossipsub");
                 self.peer_manager_mut().report_peer(
                     &peer_id,
@@ -1421,7 +1418,7 @@ impl<P: Preset> Network<P> {
                     "does_not_support_gossipsub",
                 );
             }
-            gossipsub::Event::SlowPeer {
+            Event::SlowPeer {
                 peer_id,
                 failed_messages,
             } => {

@@ -2,7 +2,7 @@
 
 use crate::TopicHash;
 use crate::types::{ForkContext, GossipEncoding, GossipKind, GossipTopic};
-use libp2p::gossipsub;
+use libp2p::gossipsub::{DataTransform, Message, RawMessage};
 use snap::raw::{Decoder, Encoder, decompress_len};
 use ssz::{SszReadDefault, SszWrite as _, WriteError};
 use std::boxed::Box;
@@ -95,12 +95,9 @@ impl SnappyTransform {
     }
 }
 
-impl gossipsub::DataTransform for SnappyTransform {
+impl DataTransform for SnappyTransform {
     // Provides the snappy decompression from RawGossipsubMessages
-    fn inbound_transform(
-        &self,
-        raw_message: gossipsub::RawMessage,
-    ) -> Result<gossipsub::Message, std::io::Error> {
+    fn inbound_transform(&self, raw_message: RawMessage) -> Result<Message, std::io::Error> {
         // first check the size of the compressed payload
         if raw_message.data.len() > self.max_compressed_len {
             return Err(Error::new(
@@ -121,7 +118,7 @@ impl gossipsub::DataTransform for SnappyTransform {
         let decompressed_data = decoder.decompress_vec(&raw_message.data)?;
 
         // Build the GossipsubMessage struct
-        Ok(gossipsub::Message {
+        Ok(Message {
             source: raw_message.source,
             data: decompressed_data,
             sequence_number: raw_message.sequence_number,
