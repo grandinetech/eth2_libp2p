@@ -7,8 +7,8 @@ use futures::{FutureExt, StreamExt};
 use helper_functions::misc;
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
 use ssz::{
-    BYTES_PER_LENGTH_OFFSET, ByteList, ContiguousList, H256, ReadError, SszSize as _,
-    SszWrite as _, WriteError,
+    BYTES_PER_LENGTH_OFFSET, ByteList, ContiguousList, H256, ProgressiveList, ReadError,
+    SszSize as _, SszWrite as _, WriteError,
 };
 use std::io;
 use std::marker::PhantomData;
@@ -195,21 +195,24 @@ pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MAX: LazyLock<usize> =
 /// Transactions are left default (empty) and their max size is added arithmetically:
 /// N offsets (4 bytes each) + N * max_bytes_per_transaction.
 /// block_access_list is also default (empty); max size = max_bytes_per_transaction.
+/// Deposit requests are also left default (empty) since their decode bound is
+/// large (`GloasDepositRequestsBound`); their max size is added arithmetically:
+/// N * size_of(DepositRequest).
 fn full_gloas_signed_execution_payload_envelope_size() -> usize {
     let envelope_with_default_txs = SignedExecutionPayloadEnvelope::<Mainnet> {
         message: ExecutionPayloadEnvelope {
             payload: ExecutionPayload {
                 extra_data: Arc::new(ByteList::from(ContiguousList::full(u8::MAX))),
-                transactions: Arc::new(ContiguousList::default()),
-                withdrawals: ContiguousList::full(Withdrawal::default()),
+                transactions: Arc::new(ProgressiveList::default()),
+                withdrawals: ProgressiveList::full(Withdrawal::default()),
                 ..Default::default()
             },
             execution_requests: ExecutionRequests {
-                deposits: ContiguousList::full(DepositRequest::default()),
-                withdrawals: ContiguousList::full(WithdrawalRequest::default()),
-                consolidations: ContiguousList::full(ConsolidationRequest::default()),
-                builder_deposits: ContiguousList::full(BuilderDepositRequest::default()),
-                builder_exits: ContiguousList::full(BuilderExitRequest::default()),
+                deposits: ProgressiveList::default(),
+                withdrawals: ProgressiveList::full(WithdrawalRequest::default()),
+                consolidations: ProgressiveList::full(ConsolidationRequest::default()),
+                builder_deposits: ProgressiveList::full(BuilderDepositRequest::default()),
+                builder_exits: ProgressiveList::full(BuilderExitRequest::default()),
             },
             ..Default::default()
         },
@@ -226,7 +229,10 @@ fn full_gloas_signed_execution_payload_envelope_size() -> usize {
 
     let max_block_access_list = <Mainnet as Preset>::MaxBytesPerTransaction::USIZE;
 
-    base + max_transactions + max_block_access_list
+    let max_deposit_requests =
+        <Mainnet as Preset>::GloasDepositRequestsBound::USIZE * DepositRequest::SIZE.fixed_part();
+
+    base + max_transactions + max_block_access_list + max_deposit_requests
 }
 
 fn rpc_execution_payload_envelope_limits() -> RpcLimits {
