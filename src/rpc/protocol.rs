@@ -213,6 +213,7 @@ fn full_gloas_signed_execution_payload_envelope_size() -> usize {
                 consolidations: ProgressiveList::full(ConsolidationRequest::default()),
                 builder_deposits: ProgressiveList::full(BuilderDepositRequest::default()),
                 builder_exits: ProgressiveList::full(BuilderExitRequest::default()),
+                ..Default::default()
             },
             ..Default::default()
         },
