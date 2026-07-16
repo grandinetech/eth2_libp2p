@@ -31,6 +31,7 @@ use types::{
     },
     gloas::containers::{
         DataColumnSidecar as GloasDataColumnSidecar, PayloadAttestationMessage,
+        SignedAggregateAndProof as GloasSignedAggregateAndProof,
         SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
         SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
@@ -217,12 +218,16 @@ impl<P: Preset> PubsubMessage<P> {
                                 Phase0SignedAggregateAndProof::from_ssz_default(data)
                                     .map_err(|e| format!("{:?}", e))?,
                             ),
-                            Some(Phase::Electra) | Some(Phase::Fulu) | Some(Phase::Gloas) => {
+                            Some(Phase::Electra) | Some(Phase::Fulu) => {
                                 SignedAggregateAndProof::Electra(
                                     ElectraSignedAggregateAndProof::from_ssz_default(data)
                                         .map_err(|e| format!("{:?}", e))?,
                                 )
                             }
+                            Some(Phase::Gloas) => SignedAggregateAndProof::Gloas(
+                                GloasSignedAggregateAndProof::from_ssz_default(data)
+                                    .map_err(|e| format!("{:?}", e))?,
+                            ),
                             None => {
                                 return Err(format!(
                                     "Unknown gossipsub fork digest: {:?}",
