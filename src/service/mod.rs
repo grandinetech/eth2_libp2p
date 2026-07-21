@@ -1982,10 +1982,10 @@ impl<P: Preset> Network<P> {
             } => {
                 match reason {
                     Ok(_) => {
-                        debug!(?addresses, "Listener gracefully closed")
+                        debug!(?addresses, "Listener gracefully closed");
                     }
                     Err(reason) => {
-                        exception!(?addresses, ?reason, "Listener abruptly closed")
+                        exception!(?addresses, ?reason, "Listener abruptly closed");
                     }
                 };
                 if Swarm::listeners(&self.swarm).count() == 0 {
