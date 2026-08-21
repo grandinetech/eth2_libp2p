@@ -271,6 +271,7 @@ impl<P: Preset> Network<P> {
                 .execution_payload_bid_timeout(chain_config.slot_duration_ms)
                 .execution_payload_timeout(chain_config.slot_duration_ms)
                 .payload_attestation_message_timeout(chain_config.slot_duration_ms)
+                .proposer_preferences_timeout(half_epoch)
                 .build()
         };
 
