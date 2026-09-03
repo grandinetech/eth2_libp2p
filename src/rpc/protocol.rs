@@ -6,10 +6,7 @@ use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, StreamExt};
 use helper_functions::misc;
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
-use ssz::{
-    BYTES_PER_LENGTH_OFFSET, ByteList, ContiguousList, H256, ProgressiveList, ReadError,
-    SszSize as _, SszWrite as _, WriteError,
-};
+use ssz::{BYTES_PER_LENGTH_OFFSET, H256, ReadError, SszSize as _, SszWrite as _, WriteError};
 use std::io;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -22,13 +19,10 @@ use tokio_util::{
     compat::{Compat, FuturesAsyncReadCompatExt},
 };
 use typenum::Unsigned as _;
-use types::capella::containers::Withdrawal;
 use types::deneb::containers::BlobIdentifier;
-use types::electra::containers::{ConsolidationRequest, DepositRequest, WithdrawalRequest};
 use types::fulu::containers::DataColumnSidecar as FuluDataColumnSidecar;
 use types::gloas::containers::{
-    BuilderDepositRequest, BuilderExitRequest, DataColumnSidecar as GloasDataColumnSidecar,
-    ExecutionPayload, ExecutionPayloadEnvelope, ExecutionRequests, SignedExecutionPayloadEnvelope,
+    DataColumnSidecar as GloasDataColumnSidecar, SignedExecutionPayloadEnvelope,
 };
 use types::phase0::primitives::Epoch;
 use types::{
@@ -82,12 +76,25 @@ pub static DATA_COLUMN_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
         .len()
 });
 
-/// Minimum SSZ size of SignedExecutionPayloadEnvelope (all variable fields at minimum).
 pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MIN: LazyLock<usize> = LazyLock::new(|| {
     SignedExecutionPayloadEnvelope::<Mainnet>::default()
         .to_ssz()
         .expect("should serialize")
         .len()
+});
+
+pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
+    let base = SignedExecutionPayloadEnvelope::<Mainnet>::full()
+        .to_ssz()
+        .expect("should serialize")
+        .len();
+
+    let max_transactions = <Mainnet as Preset>::MaxTransactionsPerPayload::USIZE
+        * (BYTES_PER_LENGTH_OFFSET.get() + <Mainnet as Preset>::MaxBytesPerTransaction::USIZE);
+
+    let max_block_access_list = <Mainnet as Preset>::MaxBytesPerTransaction::USIZE;
+
+    base + max_transactions + max_block_access_list
 });
 
 pub const ERROR_TYPE_MIN: usize = 0;
@@ -182,58 +189,6 @@ fn rpc_light_client_bootstrap_limits_by_fork<P: Preset>(current_fork: Phase) -> 
             )
         }
     }
-}
-
-/// Maximum SSZ size of SignedExecutionPayloadEnvelope.
-/// Uses arithmetic calculation for transactions instead of allocating full max-size payloads.
-pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MAX: LazyLock<usize> =
-    LazyLock::new(full_gloas_signed_execution_payload_envelope_size);
-
-/// Compute max SSZ size of SignedExecutionPayloadEnvelope without materializing transactions.
-///
-/// Populates all cheap fields at full capacity (extra_data, withdrawals, execution_requests).
-/// Transactions are left default (empty) and their max size is added arithmetically:
-/// N offsets (4 bytes each) + N * max_bytes_per_transaction.
-/// block_access_list is also default (empty); max size = max_bytes_per_transaction.
-/// Deposit requests are also left default (empty) since their decode bound is
-/// large (`GloasDepositRequestsBound`); their max size is added arithmetically:
-/// N * size_of(DepositRequest).
-fn full_gloas_signed_execution_payload_envelope_size() -> usize {
-    let envelope_with_default_txs = SignedExecutionPayloadEnvelope::<Mainnet> {
-        message: ExecutionPayloadEnvelope {
-            payload: ExecutionPayload {
-                extra_data: Arc::new(ByteList::from(ContiguousList::full(u8::MAX))),
-                transactions: Arc::new(ProgressiveList::default()),
-                withdrawals: ProgressiveList::full(Withdrawal::default()),
-                ..Default::default()
-            },
-            execution_requests: ExecutionRequests {
-                deposits: ProgressiveList::default(),
-                withdrawals: ProgressiveList::full(WithdrawalRequest::default()),
-                consolidations: ProgressiveList::full(ConsolidationRequest::default()),
-                builder_deposits: ProgressiveList::full(BuilderDepositRequest::default()),
-                builder_exits: ProgressiveList::full(BuilderExitRequest::default()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let base = envelope_with_default_txs
-        .to_ssz()
-        .expect("should serialize")
-        .len();
-
-    let max_transactions = <Mainnet as Preset>::MaxTransactionsPerPayload::USIZE
-        * (BYTES_PER_LENGTH_OFFSET.get() + <Mainnet as Preset>::MaxBytesPerTransaction::USIZE);
-
-    let max_block_access_list = <Mainnet as Preset>::MaxBytesPerTransaction::USIZE;
-
-    let max_deposit_requests =
-        <Mainnet as Preset>::GloasDepositRequestsBound::USIZE * DepositRequest::SIZE.fixed_part();
-
-    base + max_transactions + max_block_access_list + max_deposit_requests
 }
 
 fn rpc_execution_payload_envelope_limits() -> RpcLimits {
@@ -1230,6 +1185,13 @@ mod tests {
                 .to_ssz()
                 .unwrap()
                 .len(),
+        );
+
+        // The assertion above only checks `full` against itself. This one ties it to an
+        // independent constant, so a change to the bounds `full` uses cannot pass unnoticed.
+        assert_eq!(
+            *DATA_COLUMN_GLOAS_MAX,
+            usize::try_from(<Mainnet as Preset>::MAX_DATA_COLUMN_SIDECAR_SIZE).unwrap(),
         );
     }
 }
