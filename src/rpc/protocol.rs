@@ -69,13 +69,6 @@ pub static DATA_COLUMN_GLOAS_MIN: LazyLock<usize> = LazyLock::new(|| {
         .len()
 });
 
-pub static DATA_COLUMN_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
-    GloasDataColumnSidecar::<Mainnet>::full()
-        .to_ssz()
-        .expect("full DataColumnSidecar unavailable in SSZ")
-        .len()
-});
-
 pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MIN: LazyLock<usize> = LazyLock::new(|| {
     SignedExecutionPayloadEnvelope::<Mainnet>::default()
         .to_ssz()
@@ -573,12 +566,14 @@ impl ProtocolId {
             Protocol::BlocksByRoot => rpc_block_limits_by_fork(fork_context.current_fork_name()),
             Protocol::BlobsByRange => rpc_blob_limits::<P>(),
             Protocol::BlobsByRoot => rpc_blob_limits::<P>(),
-            Protocol::DataColumnsByRoot => {
-                rpc_data_column_limits::<P>(fork_context.current_fork_name())
-            }
-            Protocol::DataColumnsByRange => {
-                rpc_data_column_limits::<P>(fork_context.current_fork_name())
-            }
+            Protocol::DataColumnsByRoot => rpc_data_column_limits::<P>(
+                fork_context.chain_config(),
+                fork_context.current_fork_name(),
+            ),
+            Protocol::DataColumnsByRange => rpc_data_column_limits::<P>(
+                fork_context.chain_config(),
+                fork_context.current_fork_name(),
+            ),
             Protocol::ExecutionPayloadEnvelopesByRange => rpc_execution_payload_envelope_limits(),
             Protocol::ExecutionPayloadEnvelopesByRoot => rpc_execution_payload_envelope_limits(),
             Protocol::Ping => RpcLimits::new(Ping::SIZE.get(), Ping::SIZE.get()),
@@ -1032,9 +1027,12 @@ pub fn rpc_blob_limits<P: Preset>() -> RpcLimits {
     }
 }
 
-pub fn rpc_data_column_limits<P: Preset>(phase: Phase) -> RpcLimits {
+pub fn rpc_data_column_limits<P: Preset>(chain_config: &ChainConfig, phase: Phase) -> RpcLimits {
     if phase >= Phase::Gloas {
-        RpcLimits::new(*DATA_COLUMN_GLOAS_MIN, *DATA_COLUMN_GLOAS_MAX)
+        RpcLimits::new(
+            *DATA_COLUMN_GLOAS_MIN,
+            chain_config.max_data_column_sidecar_size::<P>(),
+        )
     } else {
         RpcLimits::new(*DATA_COLUMN_FULU_MIN, *DATA_COLUMN_FULU_MAX)
     }
@@ -1092,9 +1090,9 @@ impl RPCError {
 mod tests {
     use ssz::{ContiguousList, DynamicList, SszWrite as _};
     use types::{
-        deneb::containers::BlobSidecar,
+        deneb::{containers::BlobSidecar, primitives::KzgProof},
         phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::H256},
-        preset::Mainnet,
+        preset::{BytesPerCell, Mainnet},
     };
 
     use crate::{factory, rpc::methods::MaxErrorLen};
@@ -1179,19 +1177,12 @@ mod tests {
                 .len(),
         );
 
-        assert_eq!(
-            *DATA_COLUMN_GLOAS_MAX,
-            GloasDataColumnSidecar::<Mainnet>::full()
-                .to_ssz()
-                .unwrap()
-                .len(),
-        );
+        let max_blobs = config.max_blobs();
 
-        // The assertion above only checks `full` against itself. This one ties it to an
-        // independent constant, so a change to the bounds `full` uses cannot pass unnoticed.
         assert_eq!(
-            *DATA_COLUMN_GLOAS_MAX,
-            usize::try_from(<Mainnet as Preset>::MAX_DATA_COLUMN_SIDECAR_SIZE).unwrap(),
+            config.max_data_column_sidecar_size::<Mainnet>(),
+            *DATA_COLUMN_GLOAS_MIN
+                + max_blobs * (BytesPerCell::<Mainnet>::USIZE + KzgProof::len_bytes()),
         );
     }
 }
