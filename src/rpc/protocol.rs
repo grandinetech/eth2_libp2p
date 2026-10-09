@@ -556,45 +556,42 @@ impl ProtocolId {
     }
 
     /// Returns min and max size for messages of given protocol id responses.
-    pub fn rpc_response_limits<P: Preset>(&self, fork_context: &ForkContext) -> RpcLimits {
+    ///
+    /// `phase` is the fork of the response itself (from its context bytes).
+    /// It can be older than the current fork, e.g. when syncing pre-fork slots.
+    pub fn rpc_response_limits<P: Preset>(
+        &self,
+        fork_context: &ForkContext,
+        phase: Phase,
+    ) -> RpcLimits {
         match self.versioned_protocol.protocol() {
             Protocol::Status => {
                 RpcLimits::new(StatusMessageV1::SIZE.get(), StatusMessageV2::SIZE.get())
             }
             Protocol::Goodbye => RpcLimits::new(0, 0), // Goodbye request has no response
-            Protocol::BlocksByRange => rpc_block_limits_by_fork(fork_context.current_fork_name()),
-            Protocol::BlocksByRoot => rpc_block_limits_by_fork(fork_context.current_fork_name()),
+            Protocol::BlocksByRange => rpc_block_limits_by_fork(phase),
+            Protocol::BlocksByRoot => rpc_block_limits_by_fork(phase),
             Protocol::BlobsByRange => rpc_blob_limits::<P>(),
             Protocol::BlobsByRoot => rpc_blob_limits::<P>(),
-            Protocol::DataColumnsByRoot => rpc_data_column_limits::<P>(
-                fork_context.chain_config(),
-                fork_context.current_fork_name(),
-            ),
-            Protocol::DataColumnsByRange => rpc_data_column_limits::<P>(
-                fork_context.chain_config(),
-                fork_context.current_fork_name(),
-            ),
+            Protocol::DataColumnsByRoot => {
+                rpc_data_column_limits::<P>(fork_context.chain_config(), phase)
+            }
+            Protocol::DataColumnsByRange => {
+                rpc_data_column_limits::<P>(fork_context.chain_config(), phase)
+            }
             Protocol::ExecutionPayloadEnvelopesByRange => rpc_execution_payload_envelope_limits(),
             Protocol::ExecutionPayloadEnvelopesByRoot => rpc_execution_payload_envelope_limits(),
             Protocol::Ping => RpcLimits::new(Ping::SIZE.get(), Ping::SIZE.get()),
             Protocol::MetaData => RpcLimits::new(MetaDataV1::SIZE.get(), MetaDataV3::SIZE.get()),
-            Protocol::LightClientBootstrap => {
-                rpc_light_client_bootstrap_limits_by_fork::<P>(fork_context.current_fork_name())
-            }
+            Protocol::LightClientBootstrap => rpc_light_client_bootstrap_limits_by_fork::<P>(phase),
             Protocol::LightClientOptimisticUpdate => {
-                rpc_light_client_optimistic_update_limits_by_fork::<P>(
-                    fork_context.current_fork_name(),
-                )
+                rpc_light_client_optimistic_update_limits_by_fork::<P>(phase)
             }
             Protocol::LightClientFinalityUpdate => {
-                rpc_light_client_finality_update_limits_by_fork::<P>(
-                    fork_context.current_fork_name(),
-                )
+                rpc_light_client_finality_update_limits_by_fork::<P>(phase)
             }
             Protocol::LightClientUpdatesByRange => {
-                rpc_light_client_updates_by_range_limits_by_fork::<P>(
-                    fork_context.current_fork_name(),
-                )
+                rpc_light_client_updates_by_range_limits_by_fork::<P>(phase)
             }
         }
     }

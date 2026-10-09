@@ -305,7 +305,14 @@ impl<P: Preset> SSZSnappyOutboundCodec<P> {
 
         // Should not attempt to decode rpc chunks with `length > max_packet_size` or not within bounds of
         // packet size for ssz container corresponding to `self.protocol`.
-        let ssz_limits = self.protocol.rpc_response_limits::<P>(&self.fork_context);
+        // Use the response's own fork, not the current one.
+        // Pre-fork chunks (e.g. Fulu sidecars while in Gloas) have different size limits.
+        let phase = self
+            .phase
+            .unwrap_or_else(|| self.fork_context.current_fork_name());
+        let ssz_limits = self
+            .protocol
+            .rpc_response_limits::<P>(&self.fork_context, phase);
         if ssz_limits.is_out_of_bounds(length, self.max_packet_size) {
             return Err(RPCError::InvalidData(format!(
                 "RPC response length is out of bounds, length {}, max {}, min {}, max_packet_size: {}",
@@ -2596,7 +2603,7 @@ mod tests {
         let config = Arc::new(Config::mainnet().rapid_upgrade());
         let fork_context = Arc::new(ForkContext::dummy::<Mainnet>(&config, Phase::Phase0));
 
-        let limit = protocol_id.rpc_response_limits::<Mainnet>(&fork_context);
+        let limit = protocol_id.rpc_response_limits::<Mainnet>(&fork_context, Phase::Phase0);
         let mut max = encode_len(limit.max + 1);
         let mut codec = SSZSnappyOutboundCodec::<Mainnet>::new(
             protocol_id.clone(),
@@ -2642,6 +2649,35 @@ mod tests {
             codec.decode_response(&mut min).unwrap_err(),
             RPCError::InvalidData(_)
         ));
+    }
+
+    // Regression: syncing Fulu slots after the Gloas fork.
+    // Fulu sidecars are bigger than Gloas ones.
+    // Checking them against Gloas limits got honest peers banned.
+    #[test]
+    fn test_data_column_length_limits_use_response_phase() {
+        let config = Arc::new(Config::mainnet().rapid_upgrade());
+        let fork_context = Arc::new(ForkContext::dummy::<Mainnet>(&config, Phase::Gloas));
+        let protocol_id =
+            ProtocolId::new(SupportedProtocol::DataColumnsByRangeV1, Encoding::SSZSnappy);
+
+        // Too big for Gloas, fine for Fulu.
+        let length = config.max_data_column_sidecar_size::<Mainnet>() + 1;
+        assert!(length <= *DATA_COLUMN_FULU_MAX);
+
+        let mut src = BytesMut::new();
+        src.put_u8(0);
+        src.extend_from_slice(fork_context.to_context_bytes(Phase::Fulu).as_bytes());
+        Uvi::<usize>::default().encode(length, &mut src).unwrap();
+
+        let mut codec = SSZSnappyOutboundCodec::<Mainnet>::new(
+            protocol_id,
+            config.max_payload_size,
+            fork_context,
+        );
+
+        // Payload is missing, so the codec just waits for more bytes.
+        assert!(matches!(codec.decode(&mut src), Ok(None)));
     }
 
     /// Test invalid snappy response.
