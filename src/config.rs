@@ -7,7 +7,6 @@ use crate::rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig};
 use crate::types::{ForkContext, GossipKind};
 use crate::{Enr, PeerIdSerialized};
 use libp2p::{Multiaddr, gossipsub};
-use local_ip_address::local_ipv6;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -266,18 +265,6 @@ impl Config {
                 quic6_port,
             ),
         }
-    }
-
-    /// A helper function to check if the local host has a globally routeable IPv6 address. If so,
-    /// returns true.
-    pub fn is_ipv6_supported() -> bool {
-        // If IPv6 is supported
-        let Ok(std::net::IpAddr::V6(local_ip)) = local_ipv6() else {
-            return false;
-        };
-
-        // If its globally routable, return true
-        is_global_ipv6(&local_ip)
     }
 
     pub fn listen_addrs(&self) -> &ListenAddress {
