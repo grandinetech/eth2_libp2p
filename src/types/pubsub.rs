@@ -30,8 +30,8 @@ use types::{
         DataColumnSidecar as FuluDataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock,
     },
     gloas::containers::{
-        DataColumnSidecar as GloasDataColumnSidecar, PayloadAttestationMessage,
-        SignedAggregateAndProof as GloasSignedAggregateAndProof,
+        AttesterSlashing as GloasAttesterSlashing, DataColumnSidecar as GloasDataColumnSidecar,
+        PayloadAttestationMessage, SignedAggregateAndProof as GloasSignedAggregateAndProof,
         SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
         SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
@@ -398,8 +398,11 @@ impl<P: Preset> PubsubMessage<P> {
                                 ElectraAttesterSlashing::from_ssz_default(data)
                                     .map_err(|e| format!("{:?}", e))?,
                             ),
-                            Some(Phase::Gloas) => AttesterSlashing::Electra(
-                                ElectraAttesterSlashing::from_ssz_default(data)
+                            // [Modified in Gloas:EIP7688] Gloas and Electra produce the same
+                            // SSZ bytes but different hash tree roots, so the variant must be
+                            // chosen by fork.
+                            Some(Phase::Gloas) => AttesterSlashing::Gloas(
+                                GloasAttesterSlashing::from_ssz_default(data)
                                     .map_err(|e| format!("{:?}", e))?,
                             ),
                             None => {
