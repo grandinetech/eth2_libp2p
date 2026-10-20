@@ -772,12 +772,12 @@ impl<P: Preset> Network<P> {
         // Already registered all possible gossipsub topics for metrics
     }
 
-    /// Unsubscribe from all topics that doesn't have the given fork_digest
-    pub fn unsubscribe_from_fork_topics_except(&mut self, except: ForkDigest) {
+    /// Unsubscribe from all topics whose fork digest is not in `except`.
+    pub fn unsubscribe_from_fork_topics_except(&mut self, except: &[ForkDigest]) {
         let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
         for topic in subscriptions
             .iter()
-            .filter(|topic| topic.fork_digest != except)
+            .filter(|topic| !except.contains(&topic.fork_digest))
             .cloned()
         {
             self.unsubscribe(topic);
