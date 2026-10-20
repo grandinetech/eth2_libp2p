@@ -21,6 +21,7 @@ pub const DEFAULT_TCP_PORT: u16 = 9000u16;
 pub const DEFAULT_DISC_PORT: u16 = 9000u16;
 pub const DEFAULT_QUIC_PORT: u16 = 9001u16;
 pub const DEFAULT_IDONTWANT_MESSAGE_SIZE_THRESHOLD: usize = 1000usize;
+pub const DEFAULT_UNKNOWN_ROOT_MIN_PEERS: usize = 3;
 
 pub struct GossipsubConfigParams {
     pub message_domain_valid_snappy: [u8; 4],
@@ -61,6 +62,9 @@ pub struct Config {
 
     /// Target number of connected peers.
     pub target_peers: usize,
+
+    /// Number of distinct peers required to corroborate an unknown root before lookup sync.
+    pub unknown_root_min_peers: usize,
 
     /// Target number of connected peers.
     pub target_subnet_peers: usize,
@@ -336,6 +340,7 @@ impl Default for Config {
             enr_quic6_port: None,
             enr_tcp6_port: None,
             target_peers: DEFAULT_TARGET_PEERS,
+            unknown_root_min_peers: DEFAULT_UNKNOWN_ROOT_MIN_PEERS,
             target_subnet_peers: 3,
             discv5_config,
             boot_nodes_enr: vec![],
