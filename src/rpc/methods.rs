@@ -29,7 +29,7 @@ use types::{
     traits::SignedBeaconBlock as _,
 };
 
-const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u64 = 128;
+pub(super) const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u64 = 128;
 
 /// Maximum length of error message.
 pub type MaxErrorLen = U256;

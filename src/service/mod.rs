@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::usize;
 use std_ext::ArcExt as _;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 use typenum::Unsigned as _;
 
 use types::{
@@ -1036,8 +1036,12 @@ impl<P: Preset> Network<P> {
             .eth2_rpc_mut()
             .send_response(inbound_request_id, response.into())
         {
-            if self.network_globals.peers.read().is_connected(&peer_id) {
-                error!(%peer_id, ?inbound_request_id, %response,
+            if matches!(response, RpcResponse::StreamTermination(_)) {
+                debug!(%peer_id, ?inbound_request_id, %response,
+                    "Request not found in RPC active requests for stream termination"
+                );
+            } else if self.network_globals.peers.read().is_connected(&peer_id) {
+                warn!(%peer_id, ?inbound_request_id, %response,
                     "Request not found in RPC active requests"
                 );
             }
