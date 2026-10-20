@@ -1248,7 +1248,7 @@ mod tests {
             &enr_key,
             &config,
             &EnrForkId::default(),
-            None,
+            chain_config.custody_requirement,
             ForkDigest::default(),
         )
         .unwrap();
