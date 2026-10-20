@@ -224,10 +224,19 @@ impl<P: Preset> PubsubMessage<P> {
                                         .map_err(|e| format!("{:?}", e))?,
                                 )
                             }
-                            Some(Phase::Gloas) => SignedAggregateAndProof::Gloas(
-                                GloasSignedAggregateAndProof::from_ssz_default(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
+                            Some(Phase::Gloas) => {
+                                ensure_max_message_size(
+                                    "SignedAggregateAndProof",
+                                    "MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE",
+                                    data,
+                                    P::MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE,
+                                )?;
+
+                                SignedAggregateAndProof::Gloas(
+                                    GloasSignedAggregateAndProof::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                )
+                            }
                             None => {
                                 return Err(format!(
                                     "Unknown gossipsub fork digest: {:?}",
@@ -321,6 +330,16 @@ impl<P: Preset> PubsubMessage<P> {
                     GossipKind::DataColumnSidecar(subnet_id) => {
                         match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
                             Some(Phase::Gloas) => {
+                                ensure_max_message_size(
+                                    "DataColumnSidecar",
+                                    "MAX_DATA_COLUMN_SIDECAR_SIZE",
+                                    data,
+                                    fork_context
+                                        .chain_config()
+                                        .max_data_column_sidecar_size::<P>()
+                                        as u64,
+                                )?;
+
                                 let col_sidecar = Arc::new(
                                     GloasDataColumnSidecar::from_ssz_default(data)
                                         .map_err(|e| format!("{:?}", e))?
@@ -401,10 +420,19 @@ impl<P: Preset> PubsubMessage<P> {
                             // [Modified in Gloas:EIP7688] Gloas and Electra produce the same
                             // SSZ bytes but different hash tree roots, so the variant must be
                             // chosen by fork.
-                            Some(Phase::Gloas) => AttesterSlashing::Gloas(
-                                GloasAttesterSlashing::from_ssz_default(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
+                            Some(Phase::Gloas) => {
+                                ensure_max_message_size(
+                                    "AttesterSlashing",
+                                    "MAX_ATTESTER_SLASHING_SIZE",
+                                    data,
+                                    P::MAX_ATTESTER_SLASHING_SIZE,
+                                )?;
+
+                                AttesterSlashing::Gloas(
+                                    GloasAttesterSlashing::from_ssz_default(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                )
+                            }
                             None => {
                                 return Err(format!(
                                     "Unknown gossipsub fork digest: {:?}",
@@ -531,6 +559,13 @@ impl<P: Preset> PubsubMessage<P> {
                     GossipKind::ExecutionPayloadBid => {
                         match fork_context.get_fork_from_context_bytes(gossip_topic.fork_digest) {
                             Some(Phase::Gloas) => {
+                                ensure_max_message_size(
+                                    "SignedExecutionPayloadBid",
+                                    "MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE",
+                                    data,
+                                    P::MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE,
+                                )?;
+
                                 let execution_payload_bid = Arc::new(
                                     SignedExecutionPayloadBid::from_ssz_default(data)
                                         .map_err(|e| format!("{:?}", e))?,
@@ -661,6 +696,23 @@ impl<P: Preset> PubsubMessage<P> {
     }
 }
 
+/// Rejects gossip messages that exceed the SSZ size bound of their type before decoding them.
+fn ensure_max_message_size(
+    type_name: &str,
+    bound_name: &str,
+    data: &[u8],
+    max_size: u64,
+) -> Result<(), String> {
+    if data.len() as u64 > max_size {
+        return Err(format!(
+            "{type_name} size {} exceeds {bound_name} {max_size}",
+            data.len(),
+        ));
+    }
+
+    Ok(())
+}
+
 impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -750,5 +802,73 @@ impl<P: Preset> std::fmt::Display for PubsubMessage<P> {
                 )
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use types::{config::Config as ChainConfig, preset::Mainnet};
+
+    use super::*;
+
+    fn decode_oversized(kind: GossipKind, size: usize) -> Result<PubsubMessage<Mainnet>, String> {
+        let chain_config = Arc::new(ChainConfig::mainnet().start_and_stay_in(Phase::Gloas));
+        let fork_context = ForkContext::dummy::<Mainnet>(&chain_config, Phase::Gloas);
+        let topic = GossipTopic::new(
+            kind,
+            GossipEncoding::default(),
+            fork_context.current_fork_digest(),
+        );
+        let topic_hash = TopicHash::from_raw(String::from(topic));
+        let data = vec![0u8; size];
+        PubsubMessage::decode(&topic_hash, &data, &fork_context)
+    }
+
+    #[test]
+    fn gloas_aggregate_and_proof_size_bound() {
+        let max = Mainnet::MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE as usize;
+        let err = decode_oversized(GossipKind::BeaconAggregateAndProof, max + 1).unwrap_err();
+        assert!(err.contains("MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE"), "{err}");
+        let err = decode_oversized(GossipKind::BeaconAggregateAndProof, max).unwrap_err();
+        assert!(
+            !err.contains("MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn gloas_attester_slashing_size_bound() {
+        let max = Mainnet::MAX_ATTESTER_SLASHING_SIZE as usize;
+        let err = decode_oversized(GossipKind::AttesterSlashing, max + 1).unwrap_err();
+        assert!(err.contains("MAX_ATTESTER_SLASHING_SIZE"), "{err}");
+        let err = decode_oversized(GossipKind::AttesterSlashing, max).unwrap_err();
+        assert!(!err.contains("MAX_ATTESTER_SLASHING_SIZE"), "{err}");
+    }
+
+    #[test]
+    fn gloas_data_column_sidecar_size_bound() {
+        let max = ChainConfig::mainnet()
+            .start_and_stay_in(Phase::Gloas)
+            .max_data_column_sidecar_size::<Mainnet>();
+        let kind = GossipKind::DataColumnSidecar(0);
+        let err = decode_oversized(kind.clone(), max + 1).unwrap_err();
+        assert!(err.contains("MAX_DATA_COLUMN_SIDECAR_SIZE"), "{err}");
+        let err = decode_oversized(kind, max).unwrap_err();
+        assert!(!err.contains("MAX_DATA_COLUMN_SIDECAR_SIZE"), "{err}");
+    }
+
+    #[test]
+    fn gloas_execution_payload_bid_size_bound() {
+        let max = Mainnet::MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE as usize;
+        let err = decode_oversized(GossipKind::ExecutionPayloadBid, max + 1).unwrap_err();
+        assert!(
+            err.contains("MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE"),
+            "{err}"
+        );
+        let err = decode_oversized(GossipKind::ExecutionPayloadBid, max).unwrap_err();
+        assert!(
+            !err.contains("MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE"),
+            "{err}"
+        );
     }
 }
