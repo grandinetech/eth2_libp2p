@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std_ext::ArcExt as _;
-use strum::{AsRefStr, Display, EnumString, IntoStaticStr};
+use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 use tokio_util::{
     codec::Framed,
     compat::{Compat, FuturesAsyncReadCompatExt},
@@ -264,7 +264,9 @@ impl Protocol {
             Protocol::LightClientBootstrap => None,
             Protocol::LightClientOptimisticUpdate => None,
             Protocol::LightClientFinalityUpdate => None,
-            Protocol::LightClientUpdatesByRange => todo!(),
+            Protocol::LightClientUpdatesByRange => {
+                Some(ResponseTermination::LightClientUpdatesByRange)
+            }
         }
     }
 }
@@ -278,7 +280,7 @@ pub enum Encoding {
 }
 
 /// All valid protocol name and version combinations.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum SupportedProtocol {
     StatusV1,
     StatusV2,
@@ -451,6 +453,10 @@ impl<P: Preset> UpgradeInfo for RPCProtocol<P> {
             ));
             supported_protocols.push(ProtocolId::new(
                 SupportedProtocol::LightClientFinalityUpdateV1,
+                Encoding::SSZSnappy,
+            ));
+            supported_protocols.push(ProtocolId::new(
+                SupportedProtocol::LightClientUpdatesByRangeV1,
                 Encoding::SSZSnappy,
             ));
         }
@@ -1085,7 +1091,10 @@ impl RPCError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use ssz::{ContiguousList, DynamicList, SszWrite as _};
+    use strum::IntoEnumIterator as _;
     use types::{
         deneb::{containers::BlobSidecar, primitives::KzgProof},
         phase0::{containers::SignedBeaconBlock as Phase0SignedBeaconBlock, primitives::H256},
@@ -1181,5 +1190,93 @@ mod tests {
             *DATA_COLUMN_GLOAS_MIN
                 + max_blobs * (BytesPerCell::<Mainnet>::USIZE + KzgProof::len_bytes()),
         );
+    }
+
+    /// Whether this protocol should appear in `currently_supported()` for the given context.
+    ///
+    /// Uses an exhaustive match so that adding a new `SupportedProtocol` variant
+    /// causes a compile error until this function is updated.
+    fn expected_in_currently_supported(
+        protocol: SupportedProtocol,
+        fork_context: &ForkContext,
+    ) -> bool {
+        use SupportedProtocol::*;
+        match protocol {
+            StatusV1 | StatusV2 | GoodbyeV1 | PingV1 | BlocksByRangeV1 | BlocksByRangeV2
+            | BlocksByRootV1 | BlocksByRootV2 | MetaDataV1 | MetaDataV2 => true,
+
+            BlobsByRangeV1 | BlobsByRootV1 => fork_context.fork_exists(Phase::Deneb),
+
+            DataColumnsByRootV1 | DataColumnsByRangeV1 | MetaDataV3 => {
+                fork_context.chain_config().is_peerdas_scheduled()
+            }
+
+            ExecutionPayloadEnvelopesByRangeV1 | ExecutionPayloadEnvelopesByRootV1 => {
+                fork_context.fork_exists(Phase::Gloas)
+            }
+
+            // Light client protocols are not in currently_supported()
+            LightClientBootstrapV1
+            | LightClientOptimisticUpdateV1
+            | LightClientFinalityUpdateV1
+            | LightClientUpdatesByRangeV1 => false,
+        }
+    }
+
+    /// Whether this protocol should appear in `protocol_info()` when light client server is
+    /// enabled.
+    ///
+    /// Uses an exhaustive match so that adding a new `SupportedProtocol` variant
+    /// causes a compile error until this function is updated.
+    fn expected_in_protocol_info(protocol: SupportedProtocol, fork_context: &ForkContext) -> bool {
+        use SupportedProtocol::*;
+        match protocol {
+            LightClientBootstrapV1
+            | LightClientOptimisticUpdateV1
+            | LightClientFinalityUpdateV1
+            | LightClientUpdatesByRangeV1 => true,
+
+            _ => expected_in_currently_supported(protocol, fork_context),
+        }
+    }
+
+    #[test]
+    fn all_protocols_registered() {
+        for phase in enum_iterator::all::<Phase>() {
+            let chain_config = Arc::new(ChainConfig::mainnet().start_and_stay_in(phase));
+            let fork_context = Arc::new(ForkContext::dummy::<Mainnet>(&chain_config, phase));
+
+            let currently_supported: HashSet<SupportedProtocol> =
+                SupportedProtocol::currently_supported(&fork_context)
+                    .into_iter()
+                    .map(|pid| pid.versioned_protocol)
+                    .collect();
+
+            let rpc_protocol = RPCProtocol::<Mainnet> {
+                chain_config: chain_config.clone_arc(),
+                fork_context: fork_context.clone_arc(),
+                max_rpc_size: chain_config.max_payload_size,
+                enable_light_client_server: true,
+                phantom: PhantomData,
+            };
+            let protocol_info: HashSet<SupportedProtocol> = rpc_protocol
+                .protocol_info()
+                .into_iter()
+                .map(|pid| pid.versioned_protocol)
+                .collect();
+
+            for protocol in SupportedProtocol::iter() {
+                assert_eq!(
+                    currently_supported.contains(&protocol),
+                    expected_in_currently_supported(protocol, &fork_context),
+                    "{protocol:?} registration mismatch in currently_supported() at {phase:?}"
+                );
+                assert_eq!(
+                    protocol_info.contains(&protocol),
+                    expected_in_protocol_info(protocol, &fork_context),
+                    "{protocol:?} registration mismatch in protocol_info() at {phase:?}"
+                );
+            }
+        }
     }
 }
