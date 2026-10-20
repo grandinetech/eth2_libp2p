@@ -1,6 +1,6 @@
 //! Helper functions and an extension trait for Ethereum 2 ENRs.
 
-pub use discv5::enr::CombinedKey;
+pub use enr::{CombinedKey, NodeId};
 use types::phase0::primitives::ForkDigest;
 
 use super::ENR_FILENAME;
@@ -9,7 +9,6 @@ use crate::NetworkConfig;
 use crate::types::{Enr, EnrAttestationBitfield, EnrForkId, EnrSyncCommitteeBitfield};
 use alloy_rlp::bytes::Bytes;
 use anyhow::{Result, anyhow};
-use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use libp2p::identity::Keypair;
 use ssz::{SszReadDefault as _, SszWrite};
 use std::fs::File;
@@ -200,7 +199,7 @@ pub fn build_enr(
     custody_group_count: u64,
     next_fork_digest: ForkDigest,
 ) -> Result<Enr> {
-    let mut builder = discv5::enr::Enr::builder();
+    let mut builder = enr::Enr::builder();
     let (maybe_ipv4_address, maybe_ipv6_address) = &config.enr_address;
 
     if let Some(ip) = maybe_ipv4_address {
@@ -229,15 +228,6 @@ pub fn build_enr(
             .and_then(|v6_addr| v6_addr.disc_port.try_into().ok())
     }) {
         builder.udp6(udp6_port.get());
-    }
-
-    // Add EIP 7636 client information
-    if !config.private {
-        builder.client_info(
-            APPLICATION_NAME.to_string(),
-            APPLICATION_VERSION.to_string(),
-            None,
-        );
     }
 
     // Add QUIC fields to the ENR.

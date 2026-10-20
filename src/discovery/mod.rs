@@ -10,8 +10,8 @@ pub mod enr_ext;
 // Allow external use of the ENR builder
 use crate::{ClearDialError, metrics};
 use crate::{Enr, NetworkConfig, NetworkGlobals, Subnet, SubnetDiscovery};
-use discv5::{Discv5, enr::NodeId};
-pub use enr::{CombinedKey, Eth2Enr, build_enr, load_enr_from_disk, use_or_load_enr};
+use discv5::Discv5;
+pub use enr::{CombinedKey, Eth2Enr, NodeId, build_enr, load_enr_from_disk, use_or_load_enr};
 pub use enr_ext::{CombinedKeyExt, EnrExt, peer_id_to_node_id};
 pub use libp2p::identity::{Keypair, PublicKey};
 

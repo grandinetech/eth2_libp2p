@@ -12,7 +12,7 @@ use types::{altair::consts::SyncCommitteeSubnetCount, phase0::consts::Attestatio
 pub type EnrAttestationBitfield = BitVector<AttestationSubnetCount>;
 pub type EnrSyncCommitteeBitfield = BitVector<SyncCommitteeSubnetCount>;
 
-pub type Enr = discv5::enr::Enr<discv5::enr::CombinedKey>;
+pub type Enr = enr::Enr<enr::CombinedKey>;
 
 pub use enr_fork_id::EnrForkId;
 pub use fork_context::ForkContext;
