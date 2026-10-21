@@ -802,13 +802,33 @@ impl<P: Preset> Network<P> {
     }
 
     /// Subscribe to all data columns determined by the cgc.
+    ///
+    /// If the topics of the next fork digest are already subscribed to, subscribe to the data
+    /// columns with the next fork digest as well. Otherwise columns added by a cgc increase
+    /// within the subscription window would be lost on the fork.
     pub fn subscribe_new_data_column_subnets(&mut self, sampling_column_count: u64) {
         self.network_globals
             .update_data_column_subnets::<P>(sampling_column_count);
 
+        let mut fork_digests = vec![self.enr_fork_id.fork_digest];
+
+        if let Some((_, next_fork_digest, _)) = self.fork_context.next_fork()
+            && self
+                .network_globals
+                .gossipsub_subscriptions
+                .read()
+                .iter()
+                .any(|topic| topic.fork_digest == next_fork_digest)
+        {
+            fork_digests.push(next_fork_digest);
+        }
+
         for column in self.network_globals.sampling_subnets() {
-            let kind = GossipKind::DataColumnSidecar(column);
-            self.subscribe_kind(kind);
+            for fork_digest in &fork_digests {
+                let kind = GossipKind::DataColumnSidecar(column);
+                let topic = GossipTopic::new(kind, GossipEncoding::default(), *fork_digest);
+                self.subscribe(topic);
+            }
         }
     }
 
