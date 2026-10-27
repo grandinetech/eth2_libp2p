@@ -41,7 +41,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use std::usize;
 use std_ext::ArcExt as _;
 use tracing::{debug, info, trace, warn};
 use typenum::Unsigned as _;
