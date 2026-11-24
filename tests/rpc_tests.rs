@@ -5,7 +5,7 @@ use crate::common::{Protocol, build_tracing_subscriber};
 use crate::factory;
 use eth2_libp2p::{
     NetworkEvent, ReportSource, Response,
-    rpc::{RequestType, methods::*},
+    rpc::{RPCError, RequestType, methods::*},
     service::api_types::AppRequestId,
 };
 use helper_functions::misc;
@@ -447,7 +447,7 @@ async fn test_tcp_blocks_by_range_over_limit() {
 
     // BlocksByRange Request
     let rpc_request =
-        RequestType::BlocksByRange(OldBlocksByRangeRequest::V1(OldBlocksByRangeRequestV1 {
+        RequestType::BlocksByRange(OldBlocksByRangeRequest::V2(OldBlocksByRangeRequestV2 {
             start_slot: 0,
             count: messages_to_send,
             step: 1,
@@ -476,8 +476,13 @@ async fn test_tcp_blocks_by_range_over_limit() {
                         .unwrap();
                 }
                 // The request will fail because the sender will refuse to send anything > MAX_RPC_SIZE
-                NetworkEvent::RPCFailed { app_request_id, .. } => {
+                NetworkEvent::RPCFailed {
+                    app_request_id,
+                    error,
+                    ..
+                } => {
                     assert_eq!(app_request_id, request_id);
+                    assert!(matches!(error, RPCError::IoError(_)));
                     return;
                 }
                 _ => {} // Ignore other behaviour events
